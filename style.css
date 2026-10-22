@@ -12,6 +12,7 @@
   --bike: #a77bff;
   --ok: #6dff9c;
   --gold: #ffd54a;
+  --gym: #ff4fa3;
   --bad: #ff5470;
   --radius: 16px;
   --font-hud: 'Orbitron', system-ui, sans-serif;
@@ -387,3 +388,22 @@ input[type="date"].input { min-height: 48px; color-scheme: dark; }
 
 .empty { text-align: center; padding: 18px 8px; color: var(--muted); }
 .prow > span:nth-child(2) { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 0; }
+
+/* ===== Gym ===== */
+.tile.gym { border-color: rgba(255,79,163,.28); }
+.tile.gym .tile-time { color: var(--gym); text-shadow: 0 0 12px rgba(255,79,163,.4); }
+.tile-time small { font-size: 12px; font-weight: 500; }
+.seg button.on.gym { background: rgba(255,79,163,.16); color: var(--gym); }
+.chip.on.gym { border-color: var(--gym); color: var(--gym); background: rgba(255,79,163,.12); }
+.btn.gym { border-color: var(--gym); color: var(--gym); background: rgba(255,79,163,.1); }
+.btn.gym.solid { background: var(--gym); color: #2a0015; box-shadow: 0 0 18px rgba(255,79,163,.4); }
+.dots i.gym { background: var(--gym); box-shadow: 0 0 5px var(--gym); }
+.ex-card { border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 12px; background: var(--panel-2); }
+.ex-pb { font-size: 13px; color: var(--gold); margin: 6px 2px 0; }
+.set-head, .set-row { display: grid; grid-template-columns: 34px 1fr 1fr 34px; gap: 8px; align-items: center; }
+.set-head { margin-top: 10px; font-family: var(--font-hud); font-size: 9px; letter-spacing: 1.5px; color: var(--muted); }
+.set-row { margin-top: 6px; }
+.set-row .num { text-align: center; color: var(--muted); }
+.set-row .input { padding: 9px 10px; font-size: 17px; text-align: center; }
+.gym-lines { margin-top: 4px; display: grid; gap: 2px; }
+.gym-lines b { color: var(--text); font-weight: 600; }

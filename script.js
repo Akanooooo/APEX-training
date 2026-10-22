@@ -57,6 +57,7 @@ function defaults() {
     tests: [],     // { id, date, max }
     pushups: [],   // { id, date, sets: [n], total, planned }
     cardio: [],    // { id, date, type, dist, time, watts, notes }
+    gym: [],       // { id, date, title, exercises: [{ name, sets: [{ reps, kg }] }], notes }
     draft: null    // in-progress session { date, sets: [{ t, a, done }] }
   };
 }
@@ -304,16 +305,24 @@ function recentActivity(limit) {
   const items = [
     ...state.pushups.map((p) => ({ kind: 'pu', date: p.date, id: p.id, data: p })),
     ...state.tests.map((t) => ({ kind: 'test', date: t.date, id: t.id, data: t })),
-    ...state.cardio.map((c) => ({ kind: c.type, date: c.date, id: c.id, data: c }))
+    ...state.cardio.map((c) => ({ kind: c.type, date: c.date, id: c.id, data: c })),
+    ...state.gym.map((g) => ({ kind: 'gym', date: g.date, id: g.id, data: g }))
   ].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
   return limit ? items.slice(0, limit) : items;
 }
 
 function activityItem(it, withDelete) {
-  const colors = { pu: 'var(--cyan)', test: 'var(--gold)', ski: 'var(--ski)', bike: 'var(--bike)' };
+  const colors = { pu: 'var(--cyan)', test: 'var(--gold)', ski: 'var(--ski)', bike: 'var(--bike)', gym: 'var(--gym)' };
   let title, sub;
   if (it.kind === 'pu') { title = `${it.data.total} Liegestütze`; sub = setsText(it.data.sets); }
   else if (it.kind === 'test') { title = `Max-Test: ${it.data.max}`; sub = 'Liegestütze am Stück'; }
+  else if (it.kind === 'gym') {
+    const g = it.data;
+    const prs = gymPRsIn(g);
+    title = `Gym · ${esc(g.title || 'Session')}${prs ? `<span class="pr-badge">${prs} PR</span>` : ''}`;
+    sub = `${g.exercises.length} Übungen · ${Math.round(gymVolume(g)).toLocaleString('de-DE')} kg Volumen`;
+    if (withDelete) sub += `<div class="gym-lines">${g.exercises.map((e) => `<div><b>${esc(e.name)}</b> ${e.sets.map((x) => x.kg ? `${x.reps}×${fmtKg(x.kg)}` : `${x.reps}`).join(' · ')}</div>`).join('')}</div>`;
+  }
   else {
     const c = it.data;
     const pr = isRecord(c);
@@ -464,6 +473,7 @@ function renderCal() {
     if (state.tests.some((t) => t.date === d) || (ps && ps.type === 'test' && !isDone(ps))) dots.push('test');
     if (state.cardio.some((c) => c.date === d && c.type === 'ski')) dots.push('ski');
     if (state.cardio.some((c) => c.date === d && c.type === 'bike')) dots.push('bike');
+    if (state.gym.some((g) => g.date === d)) dots.push('gym');
     const cls = ['cal-day', dd.getMonth() !== mo ? 'out' : '', d === today ? 'today' : '', d === calSel ? 'sel' : '', d === state.settings.goalDate ? 'goal' : ''].join(' ');
     cells += `<button class="${cls}" data-act="cal-day" data-date="${d}">${dd.getDate()}<span class="dots">${dots.map((c) => `<i class="${c}"></i>`).join('')}</span></button>`;
   }
@@ -481,6 +491,7 @@ function renderCal() {
       <span><span class="dots"><i class="test"></i></span>Max-Test</span>
       <span><span class="dots"><i class="ski"></i></span>SkiErg</span>
       <span><span class="dots"><i class="bike"></i></span>Rad</span>
+      <span><span class="dots"><i class="gym"></i></span>Gym</span>
     </div>
   </div>`;
 
@@ -498,15 +509,17 @@ function renderCal() {
 let cardioType = 'ski';
 function renderCardio() {
   const el = $('#view-cardio');
+  const segHtml = `<div class="seg three">
+      <button class="${cardioType === 'ski' ? 'on ski' : ''}" data-act="ctype" data-type="ski">SKIERG</button>
+      <button class="${cardioType === 'bike' ? 'on bike' : ''}" data-act="ctype" data-type="bike">FAHRRAD</button>
+      <button class="${cardioType === 'gym' ? 'on gym' : ''}" data-act="ctype" data-type="gym">GYM</button>
+    </div>`;
+  if (cardioType === 'gym') { el.innerHTML = segHtml + renderGymRecords(); return; }
   const t = TYPES[cardioType];
   const extra = [...new Set(state.cardio.filter((c) => c.type === cardioType && !t.dists.includes(c.dist)).map((c) => c.dist))].sort((a, b) => a - b);
   const hist = state.cardio.filter((c) => c.type === cardioType).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 
-  el.innerHTML = `
-    <div class="seg">
-      <button class="${cardioType === 'ski' ? 'on ski' : ''}" data-act="ctype" data-type="ski">SKIERG</button>
-      <button class="${cardioType === 'bike' ? 'on bike' : ''}" data-act="ctype" data-type="bike">FAHRRAD</button>
-    </div>
+  el.innerHTML = `${segHtml}
     <div class="tiles">${[...t.dists, ...extra].map((d) => recordTile(cardioType, d)).join('')}</div>
     <button class="btn ${cardioType} solid block" data-act="cardio" data-type="${cardioType}" style="margin-top:14px">+ Neue ${t.name}-Zeit</button>
     <div class="h2">VERLAUF</div>
@@ -526,6 +539,7 @@ function sheetAdd(date) {
       <button data-act="test" data-date="${d}"><span class="mi" style="background:rgba(255,213,74,.15);color:var(--gold)">MAX</span><div><b>Max-Test</b><span>So viele wie möglich am Stück</span></div></button>
       <button data-act="cardio" data-type="ski" data-date="${d}"><span class="mi" style="background:rgba(255,138,61,.15);color:var(--ski)">SKI</span><div><b>SkiErg</b><span>Zeit über eine Distanz</span></div></button>
       <button data-act="cardio" data-type="bike" data-date="${d}"><span class="mi" style="background:rgba(167,123,255,.15);color:var(--bike)">BIKE</span><div><b>Fahrrad</b><span>Zeit über eine Distanz</span></div></button>
+      <button data-act="gym" data-date="${d}"><span class="mi" style="background:rgba(255,79,163,.15);color:var(--gym)">GYM</span><div><b>Gym-Session</b><span>Übungen, Sätze, Gewicht</span></div></button>
     </div>`);
 }
 
@@ -612,6 +626,158 @@ function updateCardioPreview() {
   $('#cBest').textContent = b ? `Rekord: ${fmtTime(b.time)}` : 'Erster Eintrag';
 }
 
+/* ================= Gym ================= */
+const GYM_TITLES = ['Push', 'Pull', 'Beine', 'Oberkörper', 'Ganzkörper'];
+let gymForm = null;
+const fmtKg = (kg) => `${+(+kg).toFixed(2)}`.replace('.', ',');
+const exKey = (n) => n.trim().toLowerCase();
+const e1rm = (kg, reps) => (reps <= 1 ? kg : kg * (1 + reps / 30));
+const gymVolume = (g) => g.exercises.reduce((a, e) => a + e.sets.reduce((b, x) => b + x.reps * (x.kg || 0), 0), 0);
+// Better set = heavier, then more reps at the same weight.
+const betterSet = (a, b) => !b || a.kg > b.kg || (a.kg === b.kg && a.reps > b.reps);
+const bestSetOf = (sets) => sets.reduce((b, x) => (betterSet(x, b) ? x : b), null);
+
+function exerciseNames() {
+  const seen = new Map();
+  [...state.gym].sort((a, b) => b.date.localeCompare(a.date))
+    .forEach((g) => g.exercises.forEach((e) => { if (!seen.has(exKey(e.name))) seen.set(exKey(e.name), e.name); }));
+  return [...seen.values()];
+}
+
+// Per exercise: best set over all sessions, plus each session's best set for the chart.
+function gymRecords() {
+  const map = new Map();
+  const sessions = [...state.gym].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  for (const g of sessions) {
+    for (const e of g.exercises) {
+      const k = exKey(e.name);
+      if (!map.has(k)) map.set(k, { name: e.name, best: null, bestDate: null, bestId: null, history: [], prIds: new Set() });
+      const r = map.get(k);
+      const sb = bestSetOf(e.sets);
+      if (!sb) continue;
+      r.history.push({ date: g.date, kg: sb.kg, reps: sb.reps, e1rm: e1rm(sb.kg, sb.reps) });
+      if (betterSet(sb, r.best)) {
+        if (r.best) r.prIds.add(g.id); // only counts as PR when it beats an earlier session
+        r.best = sb; r.bestDate = g.date; r.bestId = g.id;
+      }
+    }
+  }
+  return [...map.values()];
+}
+function gymPRsIn(g) { return gymRecords().filter((r) => r.prIds.has(g.id)).length; }
+
+function renderGymRecords() {
+  const recs = gymRecords().sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const hist = [...state.gym].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  const tiles = recs.map((r) => {
+    const h = r.history;
+    let spark = '';
+    if (h.length > 1) {
+      const vals = h.map((x) => x.e1rm || x.reps);
+      const min = Math.min(...vals), max = Math.max(...vals), W = 120, H = 30;
+      const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * W},${max === min ? H / 2 : H - 3 - ((v - min) / (max - min)) * (H - 6)}`);
+      spark = `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${pts.join(' ')}" fill="none" stroke="var(--gym)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+    }
+    const b = r.best;
+    return `<div class="tile gym">
+      <div class="tile-dist">${esc(r.name).toUpperCase()}</div>
+      <div class="tile-time">${b.kg ? `${fmtKg(b.kg)}<small> kg × ${b.reps}</small>` : `${b.reps}<small> Reps</small>`}</div>
+      <div class="tile-sub">${b.kg && b.reps > 1 ? `1RM ≈ ${Math.round(e1rm(b.kg, b.reps))} kg · ` : ''}${fmtShort(r.bestDate)}</div>
+      ${spark}
+    </div>`;
+  }).join('');
+  return `${recs.length ? `<div class="tiles">${tiles}</div>` : `<div class="card empty">Noch keine Gym-Sessions. Trag deine erste ein – jede Übung bekommt automatisch ihren Rekord.</div>`}
+    <button class="btn gym solid block" data-act="gym" style="margin-top:14px">+ Neue Gym-Session</button>
+    <div class="h2">VERLAUF</div>
+    ${hist.length ? `<div class="list">${hist.map((g) => activityItem({ kind: 'gym', date: g.date, id: g.id, data: g }, true)).join('')}</div>` : `<div class="card empty">Noch keine Einträge.</div>`}`;
+}
+
+function sheetGym(date) {
+  gymForm = { date: date || todayIso(), title: '', notes: '', exercises: [{ name: '', sets: [{ reps: '', kg: '' }] }] };
+  renderGymSheet();
+}
+function lastGymWithTitle(title) {
+  const t = exKey(title || '');
+  if (!t) return null;
+  return [...state.gym].sort((a, b) => b.date.localeCompare(a.date)).find((g) => exKey(g.title || '') === t) || null;
+}
+function updateGymCopyBtn() {
+  const btn = $('#gCopy');
+  if (!btn) return;
+  const last = lastGymWithTitle(gymForm.title);
+  btn.classList.toggle('hidden', !last);
+  if (last) btn.textContent = `Letzte „${last.title}“ (${fmtShort(last.date)}) übernehmen`;
+}
+function copyLastGym() {
+  const last = lastGymWithTitle(gymForm.title);
+  if (!last) return;
+  gymForm.exercises = last.exercises.map((e) => ({ name: e.name, sets: e.sets.map((x) => ({ reps: String(x.reps), kg: x.kg ? String(x.kg) : '' })) }));
+  renderGymSheet();
+  toast('Übernommen – Werte anpassen und speichern');
+}
+function renderGymSheet(focusSel) {
+  const f = gymForm;
+  const prevBest = new Map(gymRecords().map((r) => [exKey(r.name), r.best]));
+  const scroll = $('#sheetPanel').scrollTop;
+  openSheet(`<div class="kicker"><span>Gym-Session</span><span>${fmtDate(f.date)}</span></div>
+    <div class="field"><label>Training</label>
+      <div class="chips" style="margin-bottom:8px">${GYM_TITLES.map((t) => `<button class="chip ${f.title === t ? 'on gym' : ''}" data-act="g-title" data-v="${t}">${t}</button>`).join('')}</div>
+      <input class="input" data-g="title" value="${esc(f.title)}" placeholder="z. B. Push, Beine …">
+    </div>
+    <button class="btn ghost block sm hidden" id="gCopy" data-act="g-copy" style="margin-bottom:14px"></button>
+    <datalist id="exNames">${exerciseNames().map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+    ${f.exercises.map((e, ei) => {
+      const pb = prevBest.get(exKey(e.name));
+      return `<div class="ex-card">
+        <div class="row">
+          <input class="input grow" list="exNames" data-g="ex-name" data-e="${ei}" value="${esc(e.name)}" placeholder="Übung, z. B. Bankdrücken">
+          <button class="icon-btn" data-act="g-del-ex" data-e="${ei}" aria-label="Übung entfernen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+        ${pb ? `<div class="ex-pb">Rekord: ${pb.kg ? `${fmtKg(pb.kg)} kg × ${pb.reps}` : `${pb.reps} Reps`}</div>` : ''}
+        <div class="set-head"><span>Satz</span><span>Wdh.</span><span>kg</span><span></span></div>
+        ${e.sets.map((x, si) => `<div class="set-row">
+          <span class="num">${si + 1}</span>
+          <input class="input" type="number" inputmode="numeric" data-g="reps" data-e="${ei}" data-s="${si}" value="${esc(x.reps)}" placeholder="10">
+          <input class="input" type="number" inputmode="decimal" step="0.5" data-g="kg" data-e="${ei}" data-s="${si}" value="${esc(x.kg)}" placeholder="–">
+          <button class="icon-btn" data-act="g-del-set" data-e="${ei}" data-s="${si}" aria-label="Satz entfernen"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+        </div>`).join('')}
+        <button class="btn ghost sm" data-act="g-add-set" data-e="${ei}" style="margin-top:6px">+ Satz</button>
+      </div>`;
+    }).join('')}
+    <button class="btn gym block" data-act="g-add-ex" style="margin-bottom:14px">+ Übung</button>
+    <div class="field"><label>Datum</label><input class="input" type="date" data-g="date" value="${f.date}"></div>
+    <div class="field"><label>Notiz</label><input class="input" data-g="notes" value="${esc(f.notes)}" placeholder="optional"></div>
+    <button class="btn gym solid block" data-act="save-gym">Session speichern</button>`);
+  $('#sheetPanel').scrollTop = scroll;
+  updateGymCopyBtn();
+  if (focusSel) { const el = document.querySelector(focusSel); if (el) { el.focus(); el.scrollIntoView({ block: 'center' }); } }
+}
+
+function saveGym() {
+  const f = gymForm;
+  const exercises = f.exercises
+    .map((e) => ({
+      name: e.name.trim(),
+      sets: e.sets
+        .map((x) => ({ reps: Math.round(+x.reps || 0), kg: Math.max(0, +String(x.kg).replace(',', '.') || 0) }))
+        .filter((x) => x.reps > 0)
+    }))
+    .filter((e) => e.name && e.sets.length);
+  if (!exercises.length) return toast('Mindestens eine Übung mit Satz eintragen');
+  const before = new Map(gymRecords().map((r) => [exKey(r.name), r.best]));
+  const entry = { id: uid(), date: f.date || todayIso(), title: f.title.trim(), exercises, notes: f.notes.trim() };
+  state.gym.push(entry);
+  gymForm = null;
+  closeSheet();
+  cardioType = 'gym';
+  save();
+  const prs = exercises.filter((e) => before.has(exKey(e.name)) && betterSet(bestSetOf(e.sets), before.get(exKey(e.name))));
+  if (prs.length) {
+    const top = bestSetOf(prs[0].sets);
+    showPR(top.kg ? `${fmtKg(top.kg)} kg × ${top.reps}` : `${top.reps} Reps`, `${prs[0].name}${prs.length > 1 ? ` + ${prs.length - 1} weitere Rekorde` : ''}`);
+  } else toast(`Session gespeichert · ${Math.round(gymVolume(entry)).toLocaleString('de-DE')} kg Volumen`);
+}
+
 /* ================= Actions ================= */
 function saveCardio() {
   const type = $('#cType').value;
@@ -662,6 +828,7 @@ function deleteEntry(kind, id) {
   if (!confirm('Eintrag löschen?')) return;
   if (kind === 'pu') state.pushups = state.pushups.filter((x) => x.id !== id);
   else if (kind === 'test') state.tests = state.tests.filter((x) => x.id !== id);
+  else if (kind === 'gym') state.gym = state.gym.filter((x) => x.id !== id);
   else state.cardio = state.cardio.filter((x) => x.id !== id);
   save();
 }
@@ -757,6 +924,29 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'save-cardio': saveCardio(); break;
+    case 'gym': sheetGym(b.dataset.date); break;
+    case 'g-title': gymForm.title = b.dataset.v; renderGymSheet(); break;
+    case 'g-copy': copyLastGym(); break;
+    case 'g-add-ex':
+      gymForm.exercises.push({ name: '', sets: [{ reps: '', kg: '' }] });
+      renderGymSheet(`[data-g="ex-name"][data-e="${gymForm.exercises.length - 1}"]`);
+      break;
+    case 'g-del-ex': gymForm.exercises.splice(+b.dataset.e, 1); renderGymSheet(); break;
+    case 'g-add-set': {
+      const ex = gymForm.exercises[+b.dataset.e];
+      const last = ex.sets[ex.sets.length - 1];
+      ex.sets.push({ reps: last ? last.reps : '', kg: last ? last.kg : '' });
+      renderGymSheet();
+      break;
+    }
+    case 'g-del-set': {
+      const ex = gymForm.exercises[+b.dataset.e];
+      ex.sets.splice(+b.dataset.s, 1);
+      if (!ex.sets.length) ex.sets.push({ reps: '', kg: '' });
+      renderGymSheet();
+      break;
+    }
+    case 'save-gym': saveGym(); break;
     case 'set': {
       const i = +b.dataset.i;
       const x = state.draft.sets[i];
@@ -824,6 +1014,15 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  const g = e.target.dataset && e.target.dataset.g;
+  if (g && gymForm) {
+    const v = e.target.value;
+    if (g === 'title' || g === 'notes' || g === 'date') gymForm[g] = v;
+    else if (g === 'ex-name') gymForm.exercises[+e.target.dataset.e].name = v;
+    else gymForm.exercises[+e.target.dataset.e].sets[+e.target.dataset.s][g] = v;
+    if (g === 'title') updateGymCopyBtn();
+    return;
+  }
   if (e.target.id === 'cTime') updateCardioPreview();
   if (e.target.id === 'cCustom') { $('#cDist').value = e.target.value; updateCardioPreview(); }
   if (e.target.id === 'freeSets') {
