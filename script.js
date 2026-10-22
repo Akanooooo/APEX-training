@@ -678,13 +678,13 @@ function sheetAdd(date) {
   const d = date || todayIso();
   openSheet(`<div class="kicker"><span>Neuer Eintrag</span><span>${fmtDate(d)}</span></div>
     <div class="menu">
-      <button data-act="free" data-ex="pu" data-date="${d}"><span class="mi" style="background:rgba(61,245,255,.15);color:var(--cyan)">LS</span><div><b>Liegestütze</b><span>Sätze frei eintragen</span></div></button>
-      <button data-act="free" data-ex="pull" data-date="${d}"><span class="mi" style="background:rgba(182,255,61,.15);color:var(--pull)">KZ</span><div><b>Klimmzüge</b><span>Sätze frei eintragen</span></div></button>
-      <button data-act="test" data-date="${d}"><span class="mi" style="background:rgba(255,213,74,.15);color:var(--gold)">MAX</span><div><b>Max-Test</b><span>So viele wie möglich am Stück</span></div></button>
+      <button data-act="free" data-ex="pu" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--cyan) 15%, transparent);color:var(--cyan)">LS</span><div><b>Liegestütze</b><span>Sätze frei eintragen</span></div></button>
+      <button data-act="free" data-ex="pull" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--pull) 15%, transparent);color:var(--pull)">KZ</span><div><b>Klimmzüge</b><span>Sätze frei eintragen</span></div></button>
+      <button data-act="test" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--gold) 15%, transparent);color:var(--gold)">MAX</span><div><b>Max-Test</b><span>So viele wie möglich am Stück</span></div></button>
       <button data-act="timed" data-date="${d}"><span class="mi" style="background:rgba(255,255,255,.08);color:var(--text)">⏱</span><div><b>Auf Zeit</b><span>Liegestütze / Klimmzüge mit Stoppuhr</span></div></button>
-      <button data-act="cardio" data-type="ski" data-date="${d}"><span class="mi" style="background:rgba(255,138,61,.15);color:var(--ski)">SKI</span><div><b>SkiErg</b><span>Zeit über eine Distanz</span></div></button>
-      <button data-act="cardio" data-type="bike" data-date="${d}"><span class="mi" style="background:rgba(167,123,255,.15);color:var(--bike)">BIKE</span><div><b>Fahrrad</b><span>Zeit über eine Distanz</span></div></button>
-      <button data-act="gym" data-date="${d}"><span class="mi" style="background:rgba(255,79,163,.15);color:var(--gym)">GYM</span><div><b>Gym-Session</b><span>Übungen, Sätze, Gewicht</span></div></button>
+      <button data-act="cardio" data-type="ski" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--ski) 15%, transparent);color:var(--ski)">SKI</span><div><b>SkiErg</b><span>Zeit über eine Distanz</span></div></button>
+      <button data-act="cardio" data-type="bike" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--bike) 15%, transparent);color:var(--bike)">BIKE</span><div><b>Fahrrad</b><span>Zeit über eine Distanz</span></div></button>
+      <button data-act="gym" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--gym) 15%, transparent);color:var(--gym)">GYM</span><div><b>Gym-Session</b><span>Übungen, Sätze, Gewicht</span></div></button>
     </div>`);
 }
 
@@ -1065,8 +1065,17 @@ function sheetSettings() {
   if (!settingsForm) settingsForm = Object.fromEntries(EX_KEYS.map((k) => [k, { ...goalOf(k) }]));
   const st = state.settings;
   const scroll = $('#sheetPanel').scrollTop;
+  const curTheme = APEX_THEMES.current();
+  APEX_THEMES.loadAll();
   openSheet(`<div class="kicker"><span>⚙ Einstellungen</span></div>
-    <div class="h2" style="margin-top:4px">ZIELE</div>
+    <div class="h2" style="margin-top:4px">DESIGN</div>
+    <div class="themes">${APEX_THEMES.list.map((t) => `<button class="theme-card ${t.id === curTheme ? 'on' : ''}" data-act="theme" data-id="${t.id}"
+        style="background:${t.vars.bg};--tc:${t.vars.cyan}">
+        <div class="tc-name" style="font-family:'${t.hud}';color:${t.vars.cyan}">${t.name}</div>
+        <div class="tc-sub" style="font-family:'${t.body}';color:${t.vars.muted}">${t.tag}</div>
+        <div class="tc-sw"><i style="background:${t.vars.cyan}"></i><i style="background:${t.vars.glow2}"></i><i style="background:${t.vars.pull || '#b6ff3d'}"></i></div>
+      </button>`).join('')}</div>
+    <div class="h2">ZIELE</div>
     ${EX_KEYS.map((k) => {
       const f = settingsForm[k], cfg = EX[k], cur = goalOf(k);
       return `<div class="card" style="--accent:${cfg.color}">
@@ -1352,6 +1361,13 @@ document.addEventListener('click', (e) => {
       break;
     case 'goal-preset': settingsForm[ex].goal = +b.dataset.v; sheetSettings(); break;
     case 'save-goal': saveGoal(); break;
+    case 'theme': {
+      const t = APEX_THEMES.set(b.dataset.id);
+      sheetSettings();
+      render();
+      toast(`Design: ${t.name}`);
+      break;
+    }
 
     case 'set': {
       const i = +b.dataset.i;

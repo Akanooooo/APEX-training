@@ -1,9 +1,10 @@
-const CACHE = 'apex-training-v4';
+const CACHE = 'apex-training-v5';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './script.js',
+  './themes.js',
   './manifest.json',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
