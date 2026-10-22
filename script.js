@@ -115,6 +115,7 @@ function defaults() {
     timed: [],     // { id, date, ex, mode, target, value }  mode 'time': target = reps, value = sec · 'amrap': target = sec, value = reps
     cardio: [],    // { id, date, type, dist, time, watts, notes }
     gym: [],       // { id, date, title, exercises: [{ name, sets: [{ reps, kg }] }], notes }
+    ftp: [],       // bike FTP tests: { id, date, watts }
     drafts: {}     // per exercise: in-progress session { date, sets: [{ t, a, done }] }
   };
 }
@@ -132,6 +133,7 @@ function migrate(raw) {
   s.timed = s.timed || [];
   s.cardio = s.cardio || [];
   s.gym = s.gym || [];
+  s.ftp = s.ftp || [];
   s.drafts = s.drafts || {};
   if (raw.draft && !s.drafts.pu) s.drafts.pu = raw.draft;
   delete s.draft;
@@ -445,17 +447,23 @@ function recentActivity(limit) {
     ...state.tests.map((t) => ({ kind: 'test', date: t.date, id: t.id, data: t })),
     ...state.timed.map((t) => ({ kind: 'timed', date: t.date, id: t.id, data: t })),
     ...state.cardio.map((c) => ({ kind: c.type, date: c.date, id: c.id, data: c })),
-    ...state.gym.map((g) => ({ kind: 'gym', date: g.date, id: g.id, data: g }))
+    ...state.gym.map((g) => ({ kind: 'gym', date: g.date, id: g.id, data: g })),
+    ...state.ftp.map((f) => ({ kind: 'ftp', date: f.date, id: f.id, data: f }))
   ].sort(byDateDesc);
   return limit ? items.slice(0, limit) : items;
 }
 
 function activityItem(it, withDelete) {
-  const colors = { test: 'var(--gold)', ski: 'var(--ski)', bike: 'var(--bike)', gym: 'var(--gym)' };
+  const colors = { test: 'var(--gold)', ski: 'var(--ski)', bike: 'var(--bike)', ftp: 'var(--bike)', gym: 'var(--gym)' };
   const color = it.kind === 'sess' || it.kind === 'timed' ? EX[it.data.ex].color : colors[it.kind];
   let title, sub;
   if (it.kind === 'sess') { title = `${it.data.total} ${EX[it.data.ex].name}`; sub = setsText(it.data.sets); }
   else if (it.kind === 'test') { title = `Max-Test ${EX[it.data.ex].name}: ${it.data.max}`; sub = 'am Stück'; }
+  else if (it.kind === 'ftp') {
+    const best = bestFtp();
+    title = `FTP-Test · ${it.data.watts} W${best && best.id === it.data.id ? '<span class="pr-badge">PR</span>' : ''}`;
+    sub = 'Fahrrad';
+  }
   else if (it.kind === 'timed') {
     const t = it.data;
     title = `${timedLabel(t.ex, t.mode, t.target)} · ${timedValue(t)}${isTimedRecord(t) ? '<span class="pr-badge">PR</span>' : ''}`;
@@ -638,7 +646,7 @@ function renderCal() {
     if (state.tests.some((t) => t.date === d) || ps.some((s) => s.type === 'test' && !isDone(s))) dots.push('test');
     if (state.timed.some((t) => t.date === d)) dots.push('timed');
     if (state.cardio.some((c) => c.date === d && c.type === 'ski')) dots.push('ski');
-    if (state.cardio.some((c) => c.date === d && c.type === 'bike')) dots.push('bike');
+    if (state.cardio.some((c) => c.date === d && c.type === 'bike') || state.ftp.some((f) => f.date === d)) dots.push('bike');
     if (state.gym.some((g) => g.date === d)) dots.push('gym');
     const cls = ['cal-day', dd.getMonth() !== mo ? 'out' : '', d === today ? 'today' : '', d === calSel ? 'sel' : '', goalDates.has(d) ? 'goal' : ''].join(' ');
     cells += `<button class="${cls}" data-act="cal-day" data-date="${d}">${dd.getDate()}<span class="dots">${dots.map((c) => `<i class="${c}"></i>`).join('')}</span></button>`;
@@ -687,13 +695,21 @@ function renderCardio() {
   if (cardioType === 'body') { el.innerHTML = segHtml + renderBodyRecords(); return; }
   const t = TYPES[cardioType];
   const extra = [...new Set(state.cardio.filter((c) => c.type === cardioType && !t.dists.includes(c.dist)).map((c) => c.dist))].sort((a, b) => a - b);
-  const hist = state.cardio.filter((c) => c.type === cardioType).sort(byDateDesc);
+  const bike = cardioType === 'bike';
+  const hist = [
+    ...state.cardio.filter((c) => c.type === cardioType).map((c) => ({ kind: c.type, date: c.date, id: c.id, data: c })),
+    ...(bike ? state.ftp.map((f) => ({ kind: 'ftp', date: f.date, id: f.id, data: f })) : [])
+  ].sort(byDateDesc);
 
   el.innerHTML = `${segHtml}
+    ${bike ? ftpTile() : ''}
     <div class="tiles">${[...t.dists, ...extra].map((d) => recordTile(cardioType, d)).join('')}</div>
-    <button class="btn ${cardioType} solid block" data-act="cardio" data-type="${cardioType}" style="margin-top:14px">+ Neue ${t.name}-Zeit</button>
+    <div class="${bike ? 'pair-btns' : ''}" style="margin-top:14px">
+      <button class="btn ${cardioType} solid block" data-act="cardio" data-type="${cardioType}">${bike ? '+ Neue Zeit' : `+ Neue ${t.name}-Zeit`}</button>
+      ${bike ? '<button class="btn bike block" data-act="ftp">+ FTP-Test</button>' : ''}
+    </div>
     <div class="h2">VERLAUF</div>
-    ${hist.length ? `<div class="list">${hist.map((c) => activityItem({ kind: c.type, date: c.date, id: c.id, data: c }, true)).join('')}</div>` : `<div class="card empty">Noch keine ${t.name}-Einträge.</div>`}
+    ${hist.length ? `<div class="list">${hist.map((it) => activityItem(it, true)).join('')}</div>` : `<div class="card empty">Noch keine ${t.name}-Einträge.</div>`}
   `;
 }
 
@@ -713,6 +729,7 @@ function sheetAdd(date) {
       <button data-act="timed" data-date="${d}"><span class="mi" style="background:rgba(255,255,255,.08);color:var(--text)">⏱</span><div><b>Auf Zeit</b><span>Liegestütze / Klimmzüge mit Stoppuhr</span></div></button>
       <button data-act="cardio" data-type="ski" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--ski) 15%, transparent);color:var(--ski)">SKI</span><div><b>SkiErg</b><span>Zeit über eine Distanz</span></div></button>
       <button data-act="cardio" data-type="bike" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--bike) 15%, transparent);color:var(--bike)">BIKE</span><div><b>Fahrrad</b><span>Zeit über eine Distanz</span></div></button>
+      <button data-act="ftp" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--bike) 15%, transparent);color:var(--bike)">FTP</span><div><b>FTP-Test</b><span>Fahrrad · nur Watt eintragen</span></div></button>
       <button data-act="gym" data-date="${d}"><span class="mi" style="background:color-mix(in srgb, var(--gym) 15%, transparent);color:var(--gym)">GYM</span><div><b>Gym-Session</b><span>Übungen, Sätze, Gewicht</span></div></button>
     </div>`);
 }
@@ -804,6 +821,62 @@ function updateCardioPreview() {
   p.textContent = txt;
   p.style.color = b && sec < b.time ? 'var(--gold)' : '';
   $('#cBest').textContent = b ? `Rekord: ${fmtTime(b.time)}` : 'Erster Eintrag';
+}
+
+/* ================= FTP (bike) ================= */
+const bestFtp = () => state.ftp.reduce((b, x) => (!b || x.watts > b.watts ? x : b), null);
+
+function ftpTile() {
+  const b = bestFtp();
+  const list = [...state.ftp].sort(byDate);
+  let delta = '';
+  if (b && list.length > 1) {
+    const prev = Math.max(...list.filter((x) => x.id !== b.id && x.date <= b.date).map((x) => x.watts));
+    if (isFinite(prev)) delta = ` <span class="delta">+${b.watts - prev} W</span>`;
+  }
+  return `<button class="tile bike ftp-tile ${b ? '' : 'empty'}" data-act="ftp">
+    <div class="tile-dist">FAHRRAD · FTP</div>
+    <div class="tile-time">${b ? `${b.watts}<small> Watt</small>` : '– <small>Watt</small>'}</div>
+    <div class="tile-sub">${b ? `Rekord vom ${fmtShort(b.date)}${delta}` : 'Noch kein FTP-Test – tippen zum Eintragen'}</div>
+    ${sparkSvg(list.map((x) => x.watts), 'var(--bike)', true)}
+  </button>`;
+}
+
+function sheetFtp(date) {
+  const b = bestFtp();
+  const last = [...state.ftp].sort(byDate).pop();
+  openSheet(`<div class="kicker"><span>Fahrrad · FTP-Test</span><span>${b ? `Rekord: ${b.watts} W` : 'Erster Test'}</span></div>
+    <div class="h1">Wie viele Watt?</div>
+    <p class="muted small">Dein FTP-Wert aus dem Test (z. B. 20-Min-Test × 0,95 oder Ramp-Test).</p>
+    <div class="field" style="margin-top:14px"><div class="stepper">
+      <button data-act="step" data-t="#ftpWatts" data-v="-5">−</button>
+      <input class="input big" id="ftpWatts" type="text" inputmode="numeric" value="${last ? last.watts : ''}" placeholder="200">
+      <button data-act="step" data-t="#ftpWatts" data-v="5">+</button>
+    </div></div>
+    <div class="preview" id="ftpPreview"></div>
+    <div class="field" style="margin-top:12px"><label>Datum</label><input class="input" type="date" id="ftpDate" value="${date || todayIso()}"></div>
+    <button class="btn bike solid block" data-act="save-ftp">Speichern</button>`);
+  updateFtpPreview();
+}
+function updateFtpPreview() {
+  const p = $('#ftpPreview');
+  if (!p) return;
+  const w = Math.round(+$('#ftpWatts').value);
+  const b = bestFtp();
+  if (!(w > 0) || !b) { p.textContent = ''; p.style.color = ''; return; }
+  p.textContent = w > b.watts ? `NEUER REKORD · +${w - b.watts} W` : w === b.watts ? 'Rekord eingestellt' : `${b.watts - w} W unter dem Rekord`;
+  p.style.color = w > b.watts ? 'var(--gold)' : '';
+}
+function saveFtp() {
+  const watts = Math.round(+$('#ftpWatts').value);
+  if (!(watts > 0)) return toast('Watt eintragen');
+  const prev = bestFtp();
+  state.ftp.push({ id: uid(), date: $('#ftpDate').value || todayIso(), watts });
+  closeSheet();
+  cardioType = 'bike';
+  save();
+  if (!prev || watts > prev.watts) showPR(`${watts} W`, `Fahrrad · FTP${prev ? ` · +${watts - prev.watts} W` : ' · erster Rekord'}`);
+  else toast(`FTP gespeichert · ${watts} W`);
 }
 
 /* ================= Timed sheet + stopwatch ================= */
@@ -1238,6 +1311,7 @@ function deleteEntry(kind, id) {
   else if (kind === 'test') state.tests = state.tests.filter((x) => x.id !== id);
   else if (kind === 'timed') state.timed = state.timed.filter((x) => x.id !== id);
   else if (kind === 'gym') state.gym = state.gym.filter((x) => x.id !== id);
+  else if (kind === 'ftp') state.ftp = state.ftp.filter((x) => x.id !== id);
   else state.cardio = state.cardio.filter((x) => x.id !== id);
   save();
 }
@@ -1330,6 +1404,8 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'save-cardio': saveCardio(); break;
+    case 'ftp': sheetFtp(b.dataset.date); break;
+    case 'save-ftp': saveFtp(); break;
 
     case 'timed': sheetTimed(ex, b.dataset.mode, b.dataset.target ? +b.dataset.target : null, b.dataset.date); break;
     case 't-ex': {
@@ -1496,6 +1572,7 @@ document.addEventListener('input', (e) => {
     if (t.dataset.tf === 'tc') { timedForm.target = Math.round(readTime('tc') || 0); swReset(); updateTimedPreview(); return; }
   }
   if (t.dataset.tf === 'c') updateCardioPreview();
+  if (t.id === 'ftpWatts') updateFtpPreview();
   if (t.id === 'cCustom') { $('#cDist').value = t.value; updateCardioPreview(); }
   if (t.id === 'freeSets') {
     const sets = (t.value.match(/\d+/g) || []).map(Number);

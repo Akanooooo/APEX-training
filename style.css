@@ -484,3 +484,8 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .tc-sub { font-size: 12px; }
 .tc-sw { display: flex; gap: 5px; }
 .tc-sw i { width: 12px; height: 12px; border-radius: 50%; }
+
+/* ===== FTP ===== */
+.ftp-tile { display: block; width: 100%; margin-bottom: 10px; }
+.ftp-tile .tile-time { font-size: 30px; }
+.pair-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
