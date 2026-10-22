@@ -143,7 +143,7 @@ function trainSession(d, tests, week) {
   else if (week % 4 === 0) { V *= 0.75; label = 'Deload'; }
   V = Math.round(V);
   const cap = Math.max(4, Math.round(m * (1 + 0.5 * p) * 0.7));
-  const k = clamp(Math.ceil(V / cap), 4, 14);
+  const k = clamp(Math.ceil(V / cap), 4, 40);
   const base = Math.floor(V / k);
   const rem = V % k;
   const sets = Array.from({ length: k }, (_, i) => base + (i < rem ? 1 : 0));
@@ -216,6 +216,16 @@ function renderHome() {
       </div>
     </div>
   </div>`;
+
+  if (best >= goal) {
+    html += `
+    <div class="card gold">
+      <div class="kicker"><span>Ziel erreicht</span><span>${best} / ${goal}</span></div>
+      <div class="h1">Zeit für mehr?</div>
+      <p class="muted">Du hast ${goal} geschafft. Setz dir ein neues Ziel – der Plan rechnet sich sofort neu.</p>
+      <button class="btn solid block" data-act="settings" style="margin-top:10px">⚙ Ziel erhöhen</button>
+    </div>`;
+  }
 
   if (!state.tests.length) {
     html += `
@@ -377,7 +387,7 @@ function recordTile(type, dist) {
 /* ================= Render: Plan ================= */
 function renderPlan() {
   const el = $('#view-plan');
-  const { goal, goalDate, days } = state.settings;
+  const { goal, goalDate } = state.settings;
   const plan = getPlan();
   const today = todayIso();
   const m = latestMax();
@@ -389,7 +399,7 @@ function renderPlan() {
     <div class="phases" style="margin-top:12px">
       <div class="phase"><div class="bar"></div><div><b>1 · BASIS</b><p class="muted small">Technik sauber, Volumen ≈ 2× dein Max-Satz pro Einheit, Sätze bei ~70 % vom Max. 90 s Pause.</p></div></div>
       <div class="phase"><div class="bar"></div><div><b>2 · AUFBAU</b><p class="muted small">Volumen steigt jede Einheit ein Stück, Sätze werden größer, Pausen kürzer (60 s). Alle 2 Wochen Max-Test.</p></div></div>
-      <div class="phase"><div class="bar"></div><div><b>3 · PEAK</b><p class="muted small">Einheiten nahe 170–180 Reps als Generalprobe, dann 4 Tage Taper (weniger Volumen) und am Ziel-Tag: ${goal}.</p></div></div>
+      <div class="phase"><div class="bar"></div><div><b>3 · PEAK</b><p class="muted small">Einheiten nahe ${Math.round(goal * 0.85)}–${Math.round(goal * 0.9)} Reps als Generalprobe, dann 4 Tage Taper (weniger Volumen) und am Ziel-Tag: ${goal}.</p></div></div>
     </div>
     <ul class="rules muted small">
       <li>3 Einheiten pro Woche, mindestens 1 Ruhetag dazwischen.</li>
@@ -417,21 +427,7 @@ function renderPlan() {
     }
   }
 
-  html += `<div class="h2">EINSTELLUNGEN</div>
-  <div class="card">
-    <div class="field"><label>Trainingstage</label>
-      <div class="days">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="day-tog ${days.includes(d) ? 'on' : ''}" data-act="day" data-d="${d}">${WD[d]}</button>`).join('')}</div>
-    </div>
-    <div class="row">
-      <div class="field grow"><label>Ziel (Reps)</label><input class="input" type="number" inputmode="numeric" id="setGoal" value="${goal}"></div>
-      <div class="field grow"><label>Ziel-Datum</label><input class="input" type="date" id="setGoalDate" value="${goalDate}"></div>
-    </div>
-    <div class="row wrap">
-      <button class="btn ghost sm" data-act="export">Backup exportieren</button>
-      <button class="btn ghost sm" data-act="import">Backup laden</button>
-      <button class="btn danger sm" data-act="reset">Alles löschen</button>
-    </div>
-  </div>`;
+  html += `<button class="btn ghost block" data-act="settings" style="margin-top:6px">⚙ Ziel &amp; Trainingstage ändern</button>`;
   el.innerHTML = html;
 }
 
@@ -778,6 +774,78 @@ function saveGym() {
   } else toast(`Session gespeichert · ${Math.round(gymVolume(entry)).toLocaleString('de-DE')} kg Volumen`);
 }
 
+/* ================= Settings (gear) ================= */
+const GOAL_PRESETS = [100, 200, 300, 500, 1000];
+let settingsForm = null; // unsaved goal edits while the sheet is open
+
+function sheetSettings() {
+  const st = state.settings;
+  if (!settingsForm) settingsForm = { goal: st.goal, goalDate: st.goalDate };
+  const f = settingsForm;
+  const scroll = $('#sheetPanel').scrollTop;
+  openSheet(`<div class="kicker"><span>⚙ Einstellungen</span></div>
+    <div class="h2" style="margin-top:4px">ZIELE</div>
+    <div class="card">
+      <div class="field"><label>Liegestütze in einer Einheit</label>
+        <div class="stepper">
+          <button data-act="goal-step" data-v="-10">−</button>
+          <input class="input big" id="sGoal" type="number" inputmode="numeric" value="${f.goal}">
+          <button data-act="goal-step" data-v="10">+</button>
+        </div>
+      </div>
+      <div class="chips" style="margin-bottom:14px">${GOAL_PRESETS.map((v) => `<button class="chip ${f.goal === v ? 'on' : ''}" data-act="goal-preset" data-v="${v}">${v}</button>`).join('')}</div>
+      <div class="field"><label>Bis wann</label><input class="input" type="date" id="sGoalDate" value="${f.goalDate}"></div>
+      <div class="preview" id="goalPreview" style="margin-bottom:12px"></div>
+      <button class="btn solid block" data-act="save-goal">Ziel übernehmen</button>
+      <p class="muted small" style="margin-top:8px">Aktuell: ${st.goal} bis ${fmtShort(st.goalDate)} – deine Einträge bleiben erhalten, nur der Plan wird neu berechnet.</p>
+    </div>
+    <div class="h2">TRAINING</div>
+    <div class="card">
+      <div class="field" style="margin:0"><label>Trainingstage</label>
+        <div class="days">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="day-tog ${st.days.includes(d) ? 'on' : ''}" data-act="day" data-d="${d}">${WD[d]}</button>`).join('')}</div>
+      </div>
+    </div>
+    <div class="h2">DATEN</div>
+    <div class="card">
+      <div class="row wrap">
+        <button class="btn ghost sm" data-act="export">Backup exportieren</button>
+        <button class="btn ghost sm" data-act="import">Backup laden</button>
+        <button class="btn danger sm" data-act="reset">Alles löschen</button>
+      </div>
+    </div>`);
+  $('#sheetPanel').scrollTop = scroll;
+  updateGoalPreview();
+}
+
+function updateGoalPreview() {
+  const f = settingsForm;
+  const el = $('#goalPreview');
+  if (!el) return;
+  const days = f.goalDate ? diffDays(todayIso(), f.goalDate) : NaN;
+  if (!(f.goal > 0) || !(days > 0)) { el.textContent = 'Ziel und ein Datum in der Zukunft wählen'; el.style.color = 'var(--bad)'; return; }
+  const m = latestMax();
+  let txt = `${days} Tage · Generalprobe ≈ ${Math.round(f.goal * 0.88)} Reps pro Einheit`;
+  // Rough sanity check: start volume is ~2.2× max set; much more than ~+60 %/week of that is a stretch.
+  if (m && f.goal > m * 2.2 * (1 + (days / 7) * 0.6)) txt += ' · sehr ambitioniert';
+  el.textContent = txt;
+  el.style.color = '';
+}
+
+function saveGoal() {
+  const f = settingsForm;
+  const goal = Math.round(+f.goal);
+  if (!(goal >= 10)) return toast('Ziel muss mindestens 10 sein');
+  if (!f.goalDate || f.goalDate <= todayIso()) return toast('Datum muss in der Zukunft liegen');
+  const changed = goal !== state.settings.goal || f.goalDate !== state.settings.goalDate;
+  state.settings.goal = goal;
+  state.settings.goalDate = f.goalDate;
+  state.draft = null;
+  settingsForm = null;
+  closeSheet();
+  save();
+  toast(changed ? `Neues Ziel: ${goal} bis ${fmtShort(f.goalDate)} · Plan neu berechnet` : 'Ziel unverändert');
+}
+
 /* ================= Actions ================= */
 function saveCardio() {
   const type = $('#cType').value;
@@ -947,6 +1015,13 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'save-gym': saveGym(); break;
+    case 'settings': settingsForm = null; sheetSettings(); break;
+    case 'goal-step':
+      settingsForm.goal = Math.max(10, (Math.round(+$('#sGoal').value) || 0) + +b.dataset.v);
+      sheetSettings();
+      break;
+    case 'goal-preset': settingsForm.goal = +b.dataset.v; sheetSettings(); break;
+    case 'save-goal': saveGoal(); break;
     case 'set': {
       const i = +b.dataset.i;
       const x = state.draft.sets[i];
@@ -995,6 +1070,7 @@ document.addEventListener('click', (e) => {
       const days = state.settings.days;
       state.settings.days = days.includes(d) ? days.filter((x) => x !== d) : [...days, d];
       save();
+      sheetSettings();
       break;
     }
     case 'export': {
@@ -1008,12 +1084,14 @@ document.addEventListener('click', (e) => {
     }
     case 'import': $('#importFile').click(); break;
     case 'reset':
-      if (confirm('Wirklich ALLE Daten löschen? (Vorher Backup exportieren!)')) { state = defaults(); save(); }
+      if (confirm('Wirklich ALLE Daten löschen? (Vorher Backup exportieren!)')) { state = defaults(); closeSheet(); save(); }
       break;
   }
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'sGoal' && settingsForm) { settingsForm.goal = Math.round(+e.target.value) || 0; updateGoalPreview(); return; }
+  if (e.target.id === 'sGoalDate' && settingsForm) { settingsForm.goalDate = e.target.value; updateGoalPreview(); return; }
   const g = e.target.dataset && e.target.dataset.g;
   if (g && gymForm) {
     const v = e.target.value;
@@ -1032,11 +1110,6 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('change', (e) => {
-  if (e.target.id === 'setGoal') {
-    const v = Math.round(+e.target.value);
-    if (v > 0) { state.settings.goal = v; save(); }
-  }
-  if (e.target.id === 'setGoalDate' && e.target.value) { state.settings.goalDate = e.target.value; save(); }
   if (e.target.id === 'importFile') {
     const f = e.target.files[0];
     if (!f) return;
