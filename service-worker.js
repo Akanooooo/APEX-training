@@ -1,4 +1,4 @@
-const CACHE = 'apex-training-v3';
+const CACHE = 'apex-training-v4';
 const ASSETS = [
   './',
   './index.html',

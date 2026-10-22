@@ -9,12 +9,30 @@ const TYPES = {
   ski: { name: 'SkiErg', dists: [500, 1000, 2000, 5000] },
   bike: { name: 'Fahrrad', dists: [5000, 10000, 20000, 40000] }
 };
+// Bodyweight programs: each gets its own goal, max tests, plan and records.
+const EX = {
+  pu: {
+    name: 'Liegestütze', short: 'LS', color: 'var(--cyan)', defGoal: 200, presets: [100, 200, 300, 500, 1000], step: 10,
+    minV: 12, minCap: 4, rest: [90, 60, 45], timeReps: [50, 100, 200], amrap: [60, 120, 300],
+    testHint: 'Gut aufwärmen (2 × 10 locker), 3 Min Pause, dann 1 Satz so viele saubere Liegestütze wie möglich.',
+    form: 'Körper gerade, Brust bis ~1 Faust über dem Boden, Arme ganz strecken.'
+  },
+  pull: {
+    name: 'Klimmzüge', short: 'KZ', color: 'var(--pull)', defGoal: 50, presets: [20, 30, 50, 75, 100], step: 5,
+    minV: 6, minCap: 2, rest: [120, 90, 75], timeReps: [10, 25, 50], amrap: [60, 120, 300],
+    testHint: 'Schultern aufwärmen, 2 × 3 locker, 3 Min Pause, dann 1 Satz so viele saubere Klimmzüge wie möglich – aus dem toten Hang, Kinn über die Stange.',
+    form: 'Aus dem toten Hang starten, Kinn über die Stange, kein Schwung, kontrolliert runter.'
+  }
+};
+const EX_KEYS = Object.keys(EX);
 
 const $ = (s) => document.querySelector(s);
 const pad = (n) => String(n).padStart(2, '0');
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const byDate = (a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id);
+const byDateDesc = (a, b) => byDate(b, a);
 
 // Dates are handled as local "YYYY-MM-DD" strings to avoid UTC shifts.
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -36,6 +54,13 @@ function fmtTime(sec) {
   const tenth = Math.round((s - whole) * 10);
   return `${m}:${pad(whole)}${tenth ? '.' + tenth : ''}`;
 }
+// Stopwatch display, always with tenths and never rounding up to the next second.
+function fmtClock(sec) {
+  const t = Math.floor(Math.max(0, sec) * 10);
+  const m = Math.floor(t / 600);
+  const r = t - m * 600;
+  return `${m}:${pad(Math.floor(r / 10))}.${r % 10}`;
+}
 function parseTime(str) {
   if (!str) return null;
   const parts = String(str).trim().replace(',', '.').split(':');
@@ -43,6 +68,7 @@ function parseTime(str) {
   const sec = parts.reduce((acc, p) => acc * 60 + parseFloat(p), 0);
   return sec > 0 ? sec : null;
 }
+const fmtDur = (sec) => (sec % 60 === 0 ? `${sec / 60} Min` : fmtTime(sec));
 const fmtDist = (m) => (m >= 1000 ? `${+(m / 1000).toFixed(2)} km` : `${m} m`);
 function paceText(type, dist, sec) {
   if (!dist || !sec) return '';
@@ -52,51 +78,72 @@ function paceText(type, dist, sec) {
 
 /* ================= State ================= */
 function defaults() {
+  const end = `${new Date().getFullYear()}-12-31`;
   return {
-    settings: { goal: 200, goalDate: `${new Date().getFullYear()}-12-31`, days: [1, 3, 5] },
-    tests: [],     // { id, date, max }
-    pushups: [],   // { id, date, sets: [n], total, planned }
+    settings: { days: [1, 3, 5], goals: Object.fromEntries(EX_KEYS.map((k) => [k, { goal: EX[k].defGoal, goalDate: end }])) },
+    tests: [],     // { id, date, ex, max }
+    pushups: [],   // bodyweight sessions (name kept for old backups): { id, date, ex, sets: [n], total, planned }
+    timed: [],     // { id, date, ex, mode, target, value }  mode 'time': target = reps, value = sec · 'amrap': target = sec, value = reps
     cardio: [],    // { id, date, type, dist, time, watts, notes }
     gym: [],       // { id, date, title, exercises: [{ name, sets: [{ reps, kg }] }], notes }
-    draft: null    // in-progress session { date, sets: [{ t, a, done }] }
+    drafts: {}     // per exercise: in-progress session { date, sets: [{ t, a, done }] }
   };
+}
+// Older versions only knew push-ups: a single goal in settings and entries without `ex`.
+function migrate(raw) {
+  const d = defaults();
+  const rs = raw.settings || {};
+  const s = { ...d, ...raw, settings: { ...d.settings, ...rs } };
+  s.settings.goals = { ...d.settings.goals, ...(rs.goals || {}) };
+  if (!rs.goals && rs.goal) s.settings.goals.pu = { goal: rs.goal, goalDate: rs.goalDate || d.settings.goals.pu.goalDate };
+  delete s.settings.goal;
+  delete s.settings.goalDate;
+  s.tests = (s.tests || []).map((t) => ({ ex: 'pu', ...t }));
+  s.pushups = (s.pushups || []).map((p) => ({ ex: 'pu', ...p }));
+  s.timed = s.timed || [];
+  s.cardio = s.cardio || [];
+  s.gym = s.gym || [];
+  s.drafts = s.drafts || {};
+  if (raw.draft && !s.drafts.pu) s.drafts.pu = raw.draft;
+  delete s.draft;
+  return s;
 }
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY));
-    if (raw && raw.settings) {
-      const d = defaults();
-      return { ...d, ...raw, settings: { ...d.settings, ...raw.settings } };
-    }
+    if (raw && raw.settings) return migrate(raw);
   } catch (e) {}
   return defaults();
 }
 let state = load();
-let planCache = null;
+let planCache = {};
 
 function persist() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { toast('Speichern fehlgeschlagen'); }
 }
-function save() { persist(); planCache = null; render(); }
+function save() { persist(); planCache = {}; render(); }
 
-const sortedTests = () => [...state.tests].sort((a, b) => a.date.localeCompare(b.date));
-const latestMax = () => { const t = sortedTests(); return t.length ? t[t.length - 1].max : 0; };
-const bestTotal = () => Math.max(0, ...state.pushups.map((p) => p.total), ...state.tests.map((t) => t.max));
-const bestSet = () => Math.max(0, ...state.tests.map((t) => t.max), ...state.pushups.flatMap((p) => p.sets));
+const goalOf = (ex) => state.settings.goals[ex];
+const testsOf = (ex) => state.tests.filter((t) => t.ex === ex).sort(byDate);
+const sessOf = (ex) => state.pushups.filter((p) => p.ex === ex).sort(byDate);
+const latestMax = (ex) => { const t = testsOf(ex); return t.length ? t[t.length - 1].max : 0; };
+const bestTotal = (ex) => Math.max(0, ...sessOf(ex).map((p) => p.total), ...testsOf(ex).map((t) => t.max));
+const bestSet = (ex) => Math.max(0, ...testsOf(ex).map((t) => t.max), ...sessOf(ex).flatMap((p) => p.sets));
 
 /* ================= Plan generator =================
-   Ziel: <goal> Liegestütze in einer Einheit am <goalDate>.
+   Ziel: <goal> Wiederholungen in einer Einheit am <goalDate> (je Übung).
    - 3 Einheiten/Woche (Tage einstellbar), Volumen steigt linear vom Startniveau
      (≈ 2,2 × Max-Satz) bis ≈ 88 % des Ziels kurz vor dem Finale.
    - Satzgröße ≈ 70 % des (hochgerechneten) Max-Satzes → Anzahl Sätze ergibt sich daraus.
    - Alle 14 Tage Max-Test; jeder neue Test kalibriert alle folgenden Einheiten neu.
    - Jede 4. Woche Deload (−25 %), die letzten 4 Tage vor dem Finale Taper (−45 %). */
-function getPlan() { if (!planCache) planCache = buildPlan(); return planCache; }
+function getPlan(ex) { if (!planCache[ex]) planCache[ex] = buildPlan(ex); return planCache[ex]; }
 
-function buildPlan() {
-  const tests = sortedTests();
+function buildPlan(ex) {
+  const tests = testsOf(ex);
   if (!tests.length) return [];
-  const { goal, goalDate, days } = state.settings;
+  const { goal, goalDate } = goalOf(ex);
+  const { days } = state.settings;
   const start = tests[0].date;
   const today = todayIso();
   if (start > goalDate) return [];
@@ -120,8 +167,8 @@ function buildPlan() {
     const week = Math.floor(diffDays(monday, d) / 7) + 1;
     const pAll = diffDays(start, d) / totalDays;
     const phase = pAll < 0.3 ? 'Basis' : pAll < 0.7 ? 'Aufbau' : 'Peak';
-    const s = { date: d, n, week, phase, type };
-    if (type === 'train') Object.assign(s, trainSession(d, tests, week));
+    const s = { ex, date: d, n, week, phase, type };
+    if (type === 'train') Object.assign(s, trainSession(ex, d, tests, week));
     else if (type === 'test') Object.assign(s, { sets: [], total: 0, label: 'Max-Test', rest: 0 });
     else Object.assign(s, { sets: [], total: goal, label: `${goal}er Challenge`, rest: 0 });
     out.push(s);
@@ -129,37 +176,54 @@ function buildPlan() {
   return out;
 }
 
-function trainSession(d, tests, week) {
-  const { goal, goalDate } = state.settings;
+function trainSession(ex, d, tests, week) {
+  const cfg = EX[ex];
+  const { goal, goalDate } = goalOf(ex);
   let t = tests[0];
   for (const x of tests) if (x.date <= d) t = x;
   const m = Math.max(1, t.max);
   const span = Math.max(1, diffDays(t.date, goalDate));
   const p = clamp(diffDays(t.date, d) / span, 0, 1);
-  const v0 = clamp(Math.round(m * 2.2), 12, Math.round(goal * 0.85));
+  const v0 = clamp(Math.round(m * 2.2), cfg.minV, Math.round(goal * 0.85));
   let V = Math.max(v0, v0 + (goal * 0.88 - v0) * p);
   let label = 'Training';
   if (diffDays(d, goalDate) <= 4) { V *= 0.55; label = 'Taper'; }
   else if (week % 4 === 0) { V *= 0.75; label = 'Deload'; }
   V = Math.round(V);
-  const cap = Math.max(4, Math.round(m * (1 + 0.5 * p) * 0.7));
+  const cap = Math.max(cfg.minCap, Math.round(m * (1 + 0.5 * p) * 0.7));
   const k = clamp(Math.ceil(V / cap), 4, 40);
   const base = Math.floor(V / k);
   const rem = V % k;
   const sets = Array.from({ length: k }, (_, i) => base + (i < rem ? 1 : 0));
-  const rest = k <= 5 ? 90 : k <= 8 ? 60 : 45;
+  const rest = k <= 5 ? cfg.rest[0] : k <= 8 ? cfg.rest[1] : cfg.rest[2];
   return { sets, total: V, rest, label };
 }
 
 function isDone(s) {
-  if (s.type === 'test') return state.tests.some((t) => t.date === s.date);
-  return state.pushups.some((p) => p.date === s.date);
+  if (s.type === 'test') return state.tests.some((t) => t.ex === s.ex && t.date === s.date);
+  return state.pushups.some((p) => p.ex === s.ex && p.date === s.date);
 }
 function setsText(sets) {
   if (!sets.length) return '';
   const counts = {};
   sets.forEach((x) => (counts[x] = (counts[x] || 0) + 1));
   return Object.keys(counts).sort((a, b) => b - a).map((v) => `${counts[v]}×${v}`).join(' · ');
+}
+
+/* ================= Timed challenges ================= */
+const timedBetter = (mode, a, b) => (mode === 'time' ? a < b : a > b);
+function timedAttempts(ex, mode, target) {
+  return state.timed.filter((t) => t.ex === ex && t.mode === mode && t.target === target).sort(byDate);
+}
+function bestTimed(ex, mode, target) {
+  return timedAttempts(ex, mode, target).reduce((b, x) => (!b || timedBetter(mode, x.value, b.value) ? x : b), null);
+}
+function isTimedRecord(t) { const b = bestTimed(t.ex, t.mode, t.target); return b && b.id === t.id; }
+const timedLabel = (ex, mode, target) => (mode === 'time' ? `${target} ${EX[ex].name} auf Zeit` : `${EX[ex].name} max in ${fmtDur(target)}`);
+const timedValue = (t) => (t.mode === 'time' ? fmtTime(t.value) : `${t.value} Wdh.`);
+function rateText(t) {
+  const perMin = t.mode === 'time' ? t.target / (t.value / 60) : t.value / (t.target / 60);
+  return `${perMin.toFixed(1).replace('.', ',')} Wdh./Min`;
 }
 
 /* ================= Render: Home ================= */
@@ -172,8 +236,9 @@ function render() {
 }
 
 function renderHeader() {
-  const left = diffDays(todayIso(), state.settings.goalDate);
-  $('#countdown').innerHTML = left >= 0 ? `<b>${left}</b> TAGE` : 'ZIEL ERREICHT?';
+  const today = todayIso();
+  const dates = EX_KEYS.map((k) => goalOf(k).goalDate).filter((d) => d >= today).sort();
+  $('#countdown').innerHTML = dates.length ? `<b>${diffDays(today, dates[0])}</b> TAGE` : 'NEUES ZIEL?';
 }
 
 function ringSvg(pct) {
@@ -186,101 +251,135 @@ function ringSvg(pct) {
   </svg>`;
 }
 
+function sparkSvg(vals, color, higherBetter) {
+  if (vals.length < 2) return '';
+  const min = Math.min(...vals), max = Math.max(...vals), W = 120, H = 30;
+  const y = (v) => {
+    if (max === min) return H / 2;
+    const f = (v - min) / (max - min);
+    return higherBetter ? H - 3 - f * (H - 6) : 3 + f * (H - 6);
+  };
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * W},${y(v)}`);
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+}
+
 function renderHome() {
   const el = $('#view-home');
-  const { goal, goalDate } = state.settings;
   const today = todayIso();
-  const best = bestTotal();
-  const plan = getPlan();
-  const todays = plan.find((s) => s.date === today);
-  const next = plan.find((s) => s.date > today);
-
   const weekStart = addDays(today, -((parse(today).getDay() + 6) % 7));
   const weekEnd = addDays(weekStart, 6);
   const inWeek = (d) => d >= weekStart && d <= weekEnd;
-  const weekReps = state.pushups.filter((p) => inWeek(p.date)).reduce((a, p) => a + p.total, 0);
-  const weekPlanned = plan.filter((s) => inWeek(s.date)).length;
-  const weekDone = plan.filter((s) => inWeek(s.date) && isDone(s)).length;
+  const planned = EX_KEYS.flatMap((k) => getPlan(k).filter((s) => inWeek(s.date)));
 
   let html = `
   <div class="card">
-    <div class="kicker"><span>Mission · ${goal} Liegestütze</span><span>bis ${fmtShort(goalDate)}</span></div>
-    <div class="hero">
-      <div class="ring">${ringSvg(clamp(best / goal, 0, 1))}
-        <div class="ring-center"><div class="ring-val">${best}</div><div class="ring-goal">/ ${goal} BEST</div></div>
-      </div>
-      <div class="stats">
-        <div class="stat"><div class="stat-label">MAX-SATZ</div><div class="stat-val">${latestMax() || '–'} <small>Reps</small></div></div>
-        <div class="stat"><div class="stat-label">DIESE WOCHE</div><div class="stat-val">${weekReps} <small>Reps</small></div></div>
-        <div class="stat"><div class="stat-label">EINHEITEN</div><div class="stat-val">${weekDone}/${weekPlanned} <small>Woche</small></div></div>
-      </div>
+    <div class="kicker"><span>Mission</span><span>${EX_KEYS.map((k) => `${goalOf(k).goal} ${EX[k].short}`).join(' · ')}</span></div>
+    <div class="duo">${EX_KEYS.map((k) => {
+      const { goal, goalDate } = goalOf(k);
+      const best = bestTotal(k);
+      return `<button class="duo-item" data-act="goto-plan" data-ex="${k}" style="--accent:${EX[k].color}">
+        <div class="ring">${ringSvg(clamp(best / goal, 0, 1))}
+          <div class="ring-center"><div class="ring-val">${best}</div><div class="ring-goal">/ ${goal}</div></div>
+        </div>
+        <div class="duo-name">${EX[k].name.toUpperCase()}</div>
+        <div class="duo-sub">Max-Satz ${latestMax(k) || '–'} · bis ${fmtShort(goalDate)}</div>
+      </button>`;
+    }).join('')}</div>
+    <div class="week-strip"><span class="stat-label">DIESE WOCHE</span>
+      ${EX_KEYS.map((k) => `<span><b style="color:${EX[k].color}">${sessOf(k).filter((p) => inWeek(p.date)).reduce((a, p) => a + p.total, 0)}</b> ${EX[k].name}</span>`).join('')}
+      <span><b>${planned.filter(isDone).length}/${planned.length}</b> Einheiten</span>
     </div>
   </div>`;
 
-  if (best >= goal) {
-    html += `
-    <div class="card gold">
-      <div class="kicker"><span>Ziel erreicht</span><span>${best} / ${goal}</span></div>
-      <div class="h1">Zeit für mehr?</div>
-      <p class="muted">Du hast ${goal} geschafft. Setz dir ein neues Ziel – der Plan rechnet sich sofort neu.</p>
-      <button class="btn solid block" data-act="settings" style="margin-top:10px">⚙ Ziel erhöhen</button>
-    </div>`;
+  for (const k of EX_KEYS) {
+    const { goal } = goalOf(k);
+    const best = bestTotal(k);
+    if (best >= goal) {
+      html += `
+      <div class="card gold">
+        <div class="kicker"><span>Ziel erreicht · ${EX[k].name}</span><span>${best} / ${goal}</span></div>
+        <div class="h1">Zeit für mehr?</div>
+        <p class="muted">Du hast ${goal} ${EX[k].name} geschafft. Setz dir ein neues Ziel – der Plan rechnet sich sofort neu.</p>
+        <button class="btn solid block" data-act="settings" style="margin-top:10px">⚙ Ziel erhöhen</button>
+      </div>`;
+    }
   }
 
-  if (!state.tests.length) {
-    html += `
-    <div class="card gold">
-      <div class="kicker"><span>Start-Sequenz</span></div>
-      <div class="h1">Max-Test machen</div>
-      <p class="muted">Mach so viele saubere Liegestütze wie möglich am Stück (Brust fast am Boden, Körper gerade). Aus dem Ergebnis berechnet APEX deinen Plan bis ${fmtShort(goalDate)}.</p>
-      <button class="btn solid block" data-act="test" style="margin-top:10px">Ergebnis eintragen</button>
-    </div>`;
-  } else if (todays) {
-    html += sessionCard(todays, true);
-  } else {
+  let anyToday = false;
+  const nexts = [];
+  for (const k of EX_KEYS) {
+    if (!testsOf(k).length) {
+      anyToday = true;
+      html += `
+      <div class="card gold">
+        <div class="kicker"><span>${EX[k].name} · Start-Sequenz</span></div>
+        <div class="h1">Max-Test machen</div>
+        <p class="muted">${EX[k].testHint} Aus dem Ergebnis berechnet APEX deinen ${EX[k].name}-Plan bis ${fmtShort(goalOf(k).goalDate)}</p>
+        <button class="btn ${k} solid block" data-act="test" data-ex="${k}" style="margin-top:10px">Ergebnis eintragen</button>
+      </div>`;
+      continue;
+    }
+    const plan = getPlan(k);
+    const t = plan.find((s) => s.date === today);
+    if (t) { anyToday = true; html += sessionCard(t, true); }
+    else { const n = plan.find((s) => s.date > today); if (n) nexts.push(n); }
+  }
+  if (!anyToday) {
     html += `
     <div class="card">
       <div class="kicker"><span>Heute</span><span class="tag deload">Ruhetag</span></div>
       <div class="h1">Regeneration</div>
-      <p class="muted">${next ? `Nächste Einheit: <b style="color:var(--text)">${fmtDate(next.date)}</b> · ${next.type === 'train' ? `${next.total} Reps (${setsText(next.sets)})` : next.label}` : 'Kein weiterer Termin im Plan.'}</p>
-      <p class="muted small">Zeit für SkiErg oder eine lockere Radrunde.</p>
+      ${nexts.length ? nexts.map((n) => `<p class="muted">Nächste ${EX[n.ex].name}: <b style="color:var(--text)">${fmtDate(n.date)}</b> · ${n.type === 'train' ? `${n.total} Reps (${setsText(n.sets)})` : n.label}</p>`).join('') : '<p class="muted">Kein weiterer Termin im Plan.</p>'}
+      <p class="muted small">Zeit für SkiErg, Rad oder Gym.</p>
     </div>`;
   }
 
   html += `<div class="h2">REKORDE</div><div class="tiles">
+    ${EX_KEYS.map((k) => maxTile(k, 'data-act="ctype" data-type="body" data-goto="1"')).join('')}
     ${recordTile('ski', 2000)}${recordTile('bike', 10000)}
   </div>`;
 
   const recent = recentActivity(5);
   html += `<div class="h2">LETZTE AKTIVITÄT</div>`;
-  html += recent.length ? `<div class="list">${recent.map(activityItem).join('')}</div>` : `<div class="card empty">Noch nichts eingetragen.</div>`;
+  html += recent.length ? `<div class="list">${recent.map((it) => activityItem(it)).join('')}</div>` : `<div class="card empty">Noch nichts eingetragen.</div>`;
   el.innerHTML = html;
 }
 
+function maxTile(ex, attrs, label) {
+  const best = bestSet(ex);
+  return `<button class="tile ${ex} ${best ? '' : 'empty'}" ${attrs}>
+    <div class="tile-dist">${label || `${EX[ex].name.toUpperCase()} · AM STÜCK`}</div>
+    <div class="tile-time">${best || '–'}<small> Wdh.</small></div>
+    <div class="tile-sub">${best ? `Beste Einheit: ${bestTotal(ex)}` : 'Noch kein Max-Test'}</div>
+    ${sparkSvg(testsOf(ex).map((t) => t.max), EX[ex].color, true)}
+  </button>`;
+}
+
 function sessionCard(s, interactive) {
+  const ex = s.ex, cfg = EX[ex];
   const done = isDone(s);
   const tagCls = s.type === 'train' ? s.label.toLowerCase() : s.type;
-  let html = `<div class="card ${s.type !== 'train' ? 'gold' : ''}">
-    <div class="kicker"><span>${s.date === todayIso() ? 'Heute' : fmtDate(s.date)} · #${s.n} · Woche ${s.week}</span><span class="tag ${tagCls}">${s.label}</span></div>`;
+  let html = `<div class="card ${s.type !== 'train' ? 'gold' : ''}" ${s.type === 'train' ? `style="--accent:${cfg.color}"` : ''}>
+    <div class="kicker"><span>${cfg.name} · ${s.date === todayIso() ? 'Heute' : fmtDate(s.date)} · Wo ${s.week}</span><span class="tag ${tagCls}">${s.label}</span></div>`;
 
   if (done) {
-    const log = state.pushups.find((p) => p.date === s.date);
-    const t = state.tests.find((x) => x.date === s.date);
+    const log = state.pushups.find((p) => p.ex === ex && p.date === s.date);
+    const t = state.tests.find((x) => x.ex === ex && x.date === s.date);
     html += `<div class="h1" style="color:var(--ok)">✓ Erledigt</div>
-      <p class="muted">${s.type === 'test' && t ? `Max-Satz: <b>${t.max}</b> Reps` : log ? `${log.total} Reps · ${setsText(log.sets)}` : ''}</p></div>`;
+      <p class="muted">${s.type === 'test' && t ? `Max-Satz: <b>${t.max}</b> ${cfg.name}` : log ? `${log.total} ${cfg.name} · ${setsText(log.sets)}` : ''}</p></div>`;
     return html;
   }
 
   if (s.type === 'test') {
-    html += `<div class="h1">Max-Test</div>
-      <p class="muted">Gut aufwärmen (2 × 10 locker), 3 Min Pause, dann 1 Satz so viele saubere Wiederholungen wie möglich. Das Ergebnis kalibriert die nächsten Wochen.</p>
-      ${interactive ? `<button class="btn solid block" data-act="test" data-date="${s.date}" style="margin-top:10px">Ergebnis eintragen</button>` : ''}</div>`;
+    html += `<div class="h1">Max-Test ${cfg.name}</div>
+      <p class="muted">${cfg.testHint} Das Ergebnis kalibriert die nächsten Wochen.</p>
+      ${interactive ? `<button class="btn solid block" data-act="test" data-ex="${ex}" data-date="${s.date}" style="margin-top:10px">Ergebnis eintragen</button>` : ''}</div>`;
     return html;
   }
   if (s.type === 'final') {
-    html += `<div class="h1">${s.total} Liegestütze</div>
+    html += `<div class="h1">${s.total} ${cfg.name}</div>
       <p class="muted">Der Tag X. Teile die ${s.total} so auf, wie es sich gut anfühlt – Ziel: in so wenigen Sätzen wie möglich. Trage jeden Satz ein.</p>
-      ${interactive ? `<button class="btn solid block" data-act="free" data-date="${s.date}" style="margin-top:10px">Sätze eintragen</button>` : ''}</div>`;
+      ${interactive ? `<button class="btn solid block" data-act="free" data-ex="${ex}" data-date="${s.date}" style="margin-top:10px">Sätze eintragen</button>` : ''}</div>`;
     return html;
   }
 
@@ -289,23 +388,23 @@ function sessionCard(s, interactive) {
     return html;
   }
 
-  if (!state.draft || state.draft.date !== s.date) {
-    state.draft = { date: s.date, sets: s.sets.map((t) => ({ t, a: t, done: false })) };
+  let dr = state.drafts[ex];
+  if (!dr || dr.date !== s.date) {
+    dr = state.drafts[ex] = { date: s.date, sets: s.sets.map((t) => ({ t, a: t, done: false })) };
     persist();
   }
-  const dr = state.draft;
   const doneReps = dr.sets.filter((x) => x.done).reduce((a, x) => a + x.a, 0);
   const nextIdx = dr.sets.findIndex((x) => !x.done);
-  html += `<div class="row between"><div class="h1">${s.total} Reps</div><div class="num" style="color:var(--cyan)">${doneReps}/${s.total}</div></div>
+  html += `<div class="row between"><div class="h1">${s.total} Reps</div><div class="num" style="color:var(--accent)">${doneReps}/${s.total}</div></div>
     <div class="progress-line"><div style="width:${clamp(doneReps / s.total, 0, 1) * 100}%"></div></div>
     <div class="sets">${dr.sets.map((x, i) => `
-      <button class="set ${x.done ? 'done' : ''} ${i === nextIdx ? 'next' : ''} ${i === dr.sets.length - 1 ? 'plus' : ''}" data-act="set" data-i="${i}">
+      <button class="set ${x.done ? 'done' : ''} ${i === nextIdx ? 'next' : ''} ${i === dr.sets.length - 1 ? 'plus' : ''}" data-act="set" data-ex="${ex}" data-i="${i}">
         <div class="n">${x.a}</div><div class="l">Satz ${i + 1}</div>
       </button>`).join('')}
     </div>
     <p class="muted small">Tippen = Satz erledigt (startet ${s.rest}s Pause). Nochmal tippen = Wiederholungen anpassen. Letzter Satz „+“: wenn's geht, mehr machen.</p>
     <div class="row" style="margin-top:10px">
-      <button class="btn solid grow" data-act="finish">Einheit speichern</button>
+      <button class="btn ${ex} solid grow" data-act="finish" data-ex="${ex}">Einheit speichern</button>
     </div>
   </div>`;
   return html;
@@ -313,19 +412,26 @@ function sessionCard(s, interactive) {
 
 function recentActivity(limit) {
   const items = [
-    ...state.pushups.map((p) => ({ kind: 'pu', date: p.date, id: p.id, data: p })),
+    ...state.pushups.map((p) => ({ kind: 'sess', date: p.date, id: p.id, data: p })),
     ...state.tests.map((t) => ({ kind: 'test', date: t.date, id: t.id, data: t })),
+    ...state.timed.map((t) => ({ kind: 'timed', date: t.date, id: t.id, data: t })),
     ...state.cardio.map((c) => ({ kind: c.type, date: c.date, id: c.id, data: c })),
     ...state.gym.map((g) => ({ kind: 'gym', date: g.date, id: g.id, data: g }))
-  ].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  ].sort(byDateDesc);
   return limit ? items.slice(0, limit) : items;
 }
 
 function activityItem(it, withDelete) {
-  const colors = { pu: 'var(--cyan)', test: 'var(--gold)', ski: 'var(--ski)', bike: 'var(--bike)', gym: 'var(--gym)' };
+  const colors = { test: 'var(--gold)', ski: 'var(--ski)', bike: 'var(--bike)', gym: 'var(--gym)' };
+  const color = it.kind === 'sess' || it.kind === 'timed' ? EX[it.data.ex].color : colors[it.kind];
   let title, sub;
-  if (it.kind === 'pu') { title = `${it.data.total} Liegestütze`; sub = setsText(it.data.sets); }
-  else if (it.kind === 'test') { title = `Max-Test: ${it.data.max}`; sub = 'Liegestütze am Stück'; }
+  if (it.kind === 'sess') { title = `${it.data.total} ${EX[it.data.ex].name}`; sub = setsText(it.data.sets); }
+  else if (it.kind === 'test') { title = `Max-Test ${EX[it.data.ex].name}: ${it.data.max}`; sub = 'am Stück'; }
+  else if (it.kind === 'timed') {
+    const t = it.data;
+    title = `${timedLabel(t.ex, t.mode, t.target)} · ${timedValue(t)}${isTimedRecord(t) ? '<span class="pr-badge">PR</span>' : ''}`;
+    sub = rateText(t);
+  }
   else if (it.kind === 'gym') {
     const g = it.data;
     const prs = gymPRsIn(g);
@@ -340,7 +446,7 @@ function activityItem(it, withDelete) {
     sub = [paceText(c.type, c.dist, c.time), c.watts ? `${c.watts} W` : '', esc(c.notes)].filter(Boolean).join(' · ');
   }
   return `<div class="item">
-    <span class="dot" style="background:${colors[it.kind]};box-shadow:0 0 8px ${colors[it.kind]}"></span>
+    <span class="dot" style="background:${color};box-shadow:0 0 8px ${color}"></span>
     <div class="grow"><div class="item-title">${title}</div><div class="item-sub">${fmtDate(it.date)}${sub ? ' · ' + sub : ''}</div></div>
     ${withDelete ? `<button class="icon-btn" data-act="del" data-kind="${it.kind}" data-id="${it.id}" aria-label="Löschen"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>` : ''}
   </div>`;
@@ -348,25 +454,13 @@ function activityItem(it, withDelete) {
 
 /* ================= Records ================= */
 function attempts(type, dist) {
-  return state.cardio.filter((c) => c.type === type && c.dist === dist).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  return state.cardio.filter((c) => c.type === type && c.dist === dist).sort(byDate);
 }
 function bestOf(type, dist) {
   const a = attempts(type, dist);
   return a.length ? a.reduce((b, x) => (x.time < b.time ? x : b)) : null;
 }
 function isRecord(c) { const b = bestOf(c.type, c.dist); return b && b.id === c.id; }
-
-function sparkline(type, dist) {
-  const a = attempts(type, dist);
-  if (a.length < 2) return '';
-  // running best: line only goes up when a new record is set (lower time = higher on chart)
-  const times = a.map((x) => x.time);
-  const min = Math.min(...times), max = Math.max(...times);
-  const W = 120, H = 30;
-  const pts = times.map((t, i) => `${(i / (times.length - 1)) * W},${max === min ? H / 2 : 3 + ((t - min) / (max - min)) * (H - 6)}`);
-  const col = type === 'ski' ? 'var(--ski)' : 'var(--bike)';
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
-}
 
 function recordTile(type, dist) {
   const b = bestOf(type, dist);
@@ -380,40 +474,83 @@ function recordTile(type, dist) {
     <div class="tile-dist">${TYPES[type].name.toUpperCase()} · ${fmtDist(dist)}</div>
     <div class="tile-time">${b ? fmtTime(b.time) : '--:--'}</div>
     <div class="tile-sub">${b ? `${paceText(type, dist, b.time)} ${delta}` : 'Noch keine Zeit'}</div>
-    ${sparkline(type, dist)}
+    ${sparkSvg(a.map((x) => x.time), type === 'ski' ? 'var(--ski)' : 'var(--bike)', false)}
   </button>`;
 }
 
+function timedTile(ex, mode, target) {
+  const b = bestTimed(ex, mode, target);
+  const a = timedAttempts(ex, mode, target);
+  return `<button class="tile ${ex} ${b ? '' : 'empty'}" data-act="timed" data-ex="${ex}" data-mode="${mode}" data-target="${target}">
+    <div class="tile-dist">${mode === 'time' ? `${target} AUF ZEIT` : `MAX IN ${fmtDur(target).toUpperCase()}`}</div>
+    <div class="tile-time">${b ? (mode === 'time' ? fmtTime(b.value) : `${b.value}<small> Wdh.</small>`) : (mode === 'time' ? '--:--' : '–')}</div>
+    <div class="tile-sub">${b ? `${rateText(b)} · ${fmtShort(b.date)}` : 'Noch kein Versuch'}</div>
+    ${sparkSvg(a.map((x) => x.value), EX[ex].color, mode !== 'time')}
+  </button>`;
+}
+
+function renderBodyRecords() {
+  let html = '';
+  for (const k of EX_KEYS) {
+    const cfg = EX[k];
+    const targets = (mode, std) => [...new Set([...std, ...state.timed.filter((t) => t.ex === k && t.mode === mode).map((t) => t.target)])].sort((a, b) => a - b);
+    const { goal, goalDate } = goalOf(k);
+    const best = bestTotal(k);
+    html += `<div class="h2" style="color:${cfg.color}">${cfg.name.toUpperCase()}</div>
+    <div class="tiles">
+      ${maxTile(k, `data-act="test" data-ex="${k}"`, 'MAX AM STÜCK')}
+      <button class="tile ${k} ${best ? '' : 'empty'}" data-act="goto-plan" data-ex="${k}">
+        <div class="tile-dist">BESTE EINHEIT</div>
+        <div class="tile-time">${best || '–'}<small> / ${goal}</small></div>
+        <div class="tile-sub">Ziel bis ${fmtShort(goalDate)}</div>
+        ${sparkSvg(sessOf(k).map((p) => p.total), cfg.color, true)}
+      </button>
+      ${targets('time', cfg.timeReps).map((r) => timedTile(k, 'time', r)).join('')}
+      ${targets('amrap', cfg.amrap).map((s) => timedTile(k, 'amrap', s)).join('')}
+    </div>`;
+  }
+  const hist = [...state.timed].sort(byDateDesc);
+  html += `<button class="btn solid block" data-act="timed" style="margin-top:14px">⏱ Neue Challenge auf Zeit</button>
+    <div class="h2">VERLAUF AUF ZEIT</div>
+    ${hist.length ? `<div class="list">${hist.map((t) => activityItem({ kind: 'timed', date: t.date, id: t.id, data: t }, true)).join('')}</div>` : `<div class="card empty">Noch keine Challenge auf Zeit. Tipp auf eine Kachel oben, um loszulegen.</div>`}`;
+  return html;
+}
+
 /* ================= Render: Plan ================= */
+let planEx = 'pu';
 function renderPlan() {
   const el = $('#view-plan');
-  const { goal, goalDate } = state.settings;
-  const plan = getPlan();
+  const ex = planEx, cfg = EX[ex];
+  const { goal, goalDate } = goalOf(ex);
+  const plan = getPlan(ex);
   const today = todayIso();
-  const m = latestMax();
+  const m = latestMax(ex);
+  const ratio = m / goal;
 
-  let html = `<div class="card">
-    <div class="kicker"><span>Strategie</span><span>${goal} bis ${fmtShort(goalDate)}</span></div>
+  let html = `<div class="seg">${EX_KEYS.map((k) => `<button class="${k === ex ? 'on ' + k : ''}" data-act="plan-ex" data-ex="${k}">${EX[k].name.toUpperCase()}</button>`).join('')}</div>
+  <div class="card" style="--accent:${cfg.color}">
+    <div class="kicker"><span>Strategie · ${cfg.name}</span><span>${goal} bis ${fmtShort(goalDate)}</span></div>
     <div class="h1">So schaffst du ${goal}</div>
-    <p class="muted">Ziel: <b style="color:var(--text)">${goal} Liegestütze in einer Einheit</b> am ${fmtShort(goalDate)} – in so wenigen Sätzen wie möglich. Der Plan rechnet sich aus deinem letzten Max-Test und passt sich bei jedem neuen Test automatisch an.</p>
+    <p class="muted">Ziel: <b style="color:var(--text)">${goal} ${cfg.name} in einer Einheit</b> am ${fmtShort(goalDate)} – in so wenigen Sätzen wie möglich. Der Plan rechnet sich aus deinem letzten Max-Test und passt sich bei jedem neuen Test automatisch an.</p>
     <div class="phases" style="margin-top:12px">
-      <div class="phase"><div class="bar"></div><div><b>1 · BASIS</b><p class="muted small">Technik sauber, Volumen ≈ 2× dein Max-Satz pro Einheit, Sätze bei ~70 % vom Max. 90 s Pause.</p></div></div>
-      <div class="phase"><div class="bar"></div><div><b>2 · AUFBAU</b><p class="muted small">Volumen steigt jede Einheit ein Stück, Sätze werden größer, Pausen kürzer (60 s). Alle 2 Wochen Max-Test.</p></div></div>
+      <div class="phase"><div class="bar"></div><div><b>1 · BASIS</b><p class="muted small">Technik sauber, Volumen ≈ 2× dein Max-Satz pro Einheit, Sätze bei ~70 % vom Max. ${cfg.rest[0]} s Pause.</p></div></div>
+      <div class="phase"><div class="bar"></div><div><b>2 · AUFBAU</b><p class="muted small">Volumen steigt jede Einheit ein Stück, Sätze werden größer, Pausen kürzer (${cfg.rest[1]} s). Alle 2 Wochen Max-Test.</p></div></div>
       <div class="phase"><div class="bar"></div><div><b>3 · PEAK</b><p class="muted small">Einheiten nahe ${Math.round(goal * 0.85)}–${Math.round(goal * 0.9)} Reps als Generalprobe, dann 4 Tage Taper (weniger Volumen) und am Ziel-Tag: ${goal}.</p></div></div>
     </div>
     <ul class="rules muted small">
       <li>3 Einheiten pro Woche, mindestens 1 Ruhetag dazwischen.</li>
       <li>Jede 4. Woche Deload (−25 %) – da wirst du stärker, nicht schwächer.</li>
-      <li>Saubere Wiederholung: Körper gerade, Brust bis ~1 Faust über dem Boden, Arme ganz strecken.</li>
+      <li>Saubere Wiederholung: ${cfg.form}</li>
+      ${ex === 'pull' ? '<li>Weniger als 5 am Stück? Am Ende jeder Einheit 3 × 3 Negative (5 s langsam ablassen) und 2 × so lange wie möglich hängen – das baut am schnellsten Kraft auf.</li>' : ''}
       <li>Satz nicht geschafft? Kurz pausieren, Rest auffüllen und im nächsten Satz weiter. Schmerzen im Gelenk → Pause.</li>
       <li>Schaffst du die Einheiten locker → Max-Test vorziehen, dann steigt der Plan.</li>
     </ul>
-    ${m ? `<p class="muted small" style="margin-top:10px">Ehrlich gesagt: Bei Max-Satz <b style="color:var(--text)">${m}</b> und ${Math.max(0, diffDays(today, goalDate))} Tagen ist das ${m >= 45 ? 'gut machbar' : m >= 25 ? 'ambitioniert, aber realistisch mit Disziplin' : 'sehr sportlich – bleib dran, jeder Test zählt'}.</p>` : ''}
+    ${m ? `<p class="muted small" style="margin-top:10px">Ehrlich gesagt: Bei Max-Satz <b style="color:var(--text)">${m}</b> und ${Math.max(0, diffDays(today, goalDate))} Tagen ist das ${ratio >= 0.22 ? 'gut machbar' : ratio >= 0.12 ? 'ambitioniert, aber realistisch mit Disziplin' : 'sehr sportlich – bleib dran, jeder Test zählt'}.</p>` : ''}
   </div>`;
 
   html += `<div class="h2">EINHEITEN</div>`;
   if (!plan.length) {
-    html += `<div class="card empty">Mach zuerst einen Max-Test, dann erscheint hier dein Plan.<br><br><button class="btn solid" data-act="test">Max-Test eintragen</button></div>`;
+    html += `<div class="card empty">Mach zuerst einen ${cfg.name}-Max-Test, dann erscheint hier dein Plan.<br><br><button class="btn ${ex} solid" data-act="test" data-ex="${ex}">Max-Test eintragen</button></div>`;
   } else {
     const weeks = {};
     plan.forEach((s) => (weeks[s.week] = weeks[s.week] || []).push(s));
@@ -422,12 +559,12 @@ function renderPlan() {
       const cur = list.some((s) => s.date >= addDays(today, -6) && s.date <= today) && list[list.length - 1].date >= today;
       html += `<div class="week ${cur ? 'current' : ''}">
         <div class="week-head"><span class="week-title">WOCHE ${w} · ${list[0].phase.toUpperCase()}</span><span class="week-sub">${list.filter((s) => s.type === 'train').reduce((a, s) => a + s.total, 0)} Reps geplant</span></div>
-        <div class="card plan-card">${list.map((s) => planRow(s, today)).join('')}</div>
+        <div class="card plan-card" style="--accent:${cfg.color}">${list.map((s) => planRow(s, today)).join('')}</div>
       </div>`;
     }
   }
 
-  html += `<button class="btn ghost block" data-act="settings" style="margin-top:6px">⚙ Ziel &amp; Trainingstage ändern</button>`;
+  html += `<button class="btn ghost block" data-act="settings" style="margin-top:6px">⚙ Ziele &amp; Trainingstage ändern</button>`;
   el.innerHTML = html;
 }
 
@@ -449,9 +586,10 @@ let calSel = todayIso();
 
 function renderCal() {
   const el = $('#view-cal');
-  const plan = getPlan();
-  const planBy = Object.fromEntries(plan.map((s) => [s.date, s]));
+  const planBy = {};
+  EX_KEYS.forEach((k) => getPlan(k).forEach((s) => (planBy[s.date] = planBy[s.date] || []).push(s)));
   const today = todayIso();
+  const goalDates = new Set(EX_KEYS.map((k) => goalOf(k).goalDate));
   const y = calMonth.getFullYear(), mo = calMonth.getMonth();
   const first = new Date(y, mo, 1);
   const startOffset = (first.getDay() + 6) % 7;
@@ -463,14 +601,17 @@ function renderCal() {
     const dd = parse(d);
     if (i >= 35 && dd.getMonth() !== mo) break;
     const dots = [];
-    const ps = planBy[d];
-    if (state.pushups.some((p) => p.date === d)) dots.push('pu');
-    else if (ps && ps.type === 'train') dots.push('pu-plan');
-    if (state.tests.some((t) => t.date === d) || (ps && ps.type === 'test' && !isDone(ps))) dots.push('test');
+    const ps = planBy[d] || [];
+    for (const k of EX_KEYS) {
+      if (state.pushups.some((p) => p.ex === k && p.date === d)) dots.push(k);
+      else if (ps.some((s) => s.ex === k && s.type === 'train')) dots.push(`${k}-plan`);
+    }
+    if (state.tests.some((t) => t.date === d) || ps.some((s) => s.type === 'test' && !isDone(s))) dots.push('test');
+    if (state.timed.some((t) => t.date === d)) dots.push('timed');
     if (state.cardio.some((c) => c.date === d && c.type === 'ski')) dots.push('ski');
     if (state.cardio.some((c) => c.date === d && c.type === 'bike')) dots.push('bike');
     if (state.gym.some((g) => g.date === d)) dots.push('gym');
-    const cls = ['cal-day', dd.getMonth() !== mo ? 'out' : '', d === today ? 'today' : '', d === calSel ? 'sel' : '', d === state.settings.goalDate ? 'goal' : ''].join(' ');
+    const cls = ['cal-day', dd.getMonth() !== mo ? 'out' : '', d === today ? 'today' : '', d === calSel ? 'sel' : '', goalDates.has(d) ? 'goal' : ''].join(' ');
     cells += `<button class="${cls}" data-act="cal-day" data-date="${d}">${dd.getDate()}<span class="dots">${dots.map((c) => `<i class="${c}"></i>`).join('')}</span></button>`;
   }
 
@@ -484,7 +625,9 @@ function renderCal() {
     <div class="legend">
       <span><span class="dots"><i class="pu-plan"></i></span>geplant</span>
       <span><span class="dots"><i class="pu"></i></span>Liegestütze</span>
+      <span><span class="dots"><i class="pull"></i></span>Klimmzüge</span>
       <span><span class="dots"><i class="test"></i></span>Max-Test</span>
+      <span><span class="dots"><i class="timed"></i></span>Auf Zeit</span>
       <span><span class="dots"><i class="ski"></i></span>SkiErg</span>
       <span><span class="dots"><i class="bike"></i></span>Rad</span>
       <span><span class="dots"><i class="gym"></i></span>Gym</span>
@@ -492,28 +635,30 @@ function renderCal() {
   </div>`;
 
   html += `<div class="h2">${fmtDate(calSel).toUpperCase()}</div>`;
-  const ps = planBy[calSel];
-  if (ps) html += sessionCard(ps, calSel === today);
+  const ps = planBy[calSel] || [];
+  ps.forEach((s) => (html += sessionCard(s, calSel === today)));
   const items = recentActivity().filter((it) => it.date === calSel);
   if (items.length) html += `<div class="list">${items.map((it) => activityItem(it, true)).join('')}</div>`;
-  if (!ps && !items.length) html += `<div class="card empty">Nichts geplant oder eingetragen.</div>`;
+  if (!ps.length && !items.length) html += `<div class="card empty">Nichts geplant oder eingetragen.</div>`;
   html += `<button class="btn ghost block" data-act="add" data-date="${calSel}" style="margin-top:12px">+ Eintrag für diesen Tag</button>`;
   el.innerHTML = html;
 }
 
-/* ================= Render: Cardio ================= */
+/* ================= Render: Records ================= */
 let cardioType = 'ski';
 function renderCardio() {
   const el = $('#view-cardio');
-  const segHtml = `<div class="seg three">
+  const segHtml = `<div class="seg four">
       <button class="${cardioType === 'ski' ? 'on ski' : ''}" data-act="ctype" data-type="ski">SKIERG</button>
-      <button class="${cardioType === 'bike' ? 'on bike' : ''}" data-act="ctype" data-type="bike">FAHRRAD</button>
+      <button class="${cardioType === 'bike' ? 'on bike' : ''}" data-act="ctype" data-type="bike">RAD</button>
       <button class="${cardioType === 'gym' ? 'on gym' : ''}" data-act="ctype" data-type="gym">GYM</button>
+      <button class="${cardioType === 'body' ? 'on' : ''}" data-act="ctype" data-type="body">KÖRPER</button>
     </div>`;
   if (cardioType === 'gym') { el.innerHTML = segHtml + renderGymRecords(); return; }
+  if (cardioType === 'body') { el.innerHTML = segHtml + renderBodyRecords(); return; }
   const t = TYPES[cardioType];
   const extra = [...new Set(state.cardio.filter((c) => c.type === cardioType && !t.dists.includes(c.dist)).map((c) => c.dist))].sort((a, b) => a - b);
-  const hist = state.cardio.filter((c) => c.type === cardioType).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  const hist = state.cardio.filter((c) => c.type === cardioType).sort(byDateDesc);
 
   el.innerHTML = `${segHtml}
     <div class="tiles">${[...t.dists, ...extra].map((d) => recordTile(cardioType, d)).join('')}</div>
@@ -525,43 +670,53 @@ function renderCardio() {
 
 /* ================= Sheets / forms ================= */
 function openSheet(html) { $('#sheetPanel').innerHTML = html; $('#sheet').classList.remove('hidden'); }
-function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetPanel').innerHTML = ''; }
+function closeSheet() { swReset(); $('#sheet').classList.add('hidden'); $('#sheetPanel').innerHTML = ''; }
+
+const exSeg = (act, ex, date) => `<div class="seg">${EX_KEYS.map((k) => `<button class="${k === ex ? 'on ' + k : ''}" data-act="${act}" data-ex="${k}" data-date="${date}">${EX[k].name.toUpperCase()}</button>`).join('')}</div>`;
 
 function sheetAdd(date) {
   const d = date || todayIso();
   openSheet(`<div class="kicker"><span>Neuer Eintrag</span><span>${fmtDate(d)}</span></div>
     <div class="menu">
-      <button data-act="free" data-date="${d}"><span class="mi" style="background:rgba(61,245,255,.15);color:var(--cyan)">PU</span><div><b>Liegestütze</b><span>Sätze frei eintragen</span></div></button>
+      <button data-act="free" data-ex="pu" data-date="${d}"><span class="mi" style="background:rgba(61,245,255,.15);color:var(--cyan)">LS</span><div><b>Liegestütze</b><span>Sätze frei eintragen</span></div></button>
+      <button data-act="free" data-ex="pull" data-date="${d}"><span class="mi" style="background:rgba(182,255,61,.15);color:var(--pull)">KZ</span><div><b>Klimmzüge</b><span>Sätze frei eintragen</span></div></button>
       <button data-act="test" data-date="${d}"><span class="mi" style="background:rgba(255,213,74,.15);color:var(--gold)">MAX</span><div><b>Max-Test</b><span>So viele wie möglich am Stück</span></div></button>
+      <button data-act="timed" data-date="${d}"><span class="mi" style="background:rgba(255,255,255,.08);color:var(--text)">⏱</span><div><b>Auf Zeit</b><span>Liegestütze / Klimmzüge mit Stoppuhr</span></div></button>
       <button data-act="cardio" data-type="ski" data-date="${d}"><span class="mi" style="background:rgba(255,138,61,.15);color:var(--ski)">SKI</span><div><b>SkiErg</b><span>Zeit über eine Distanz</span></div></button>
       <button data-act="cardio" data-type="bike" data-date="${d}"><span class="mi" style="background:rgba(167,123,255,.15);color:var(--bike)">BIKE</span><div><b>Fahrrad</b><span>Zeit über eine Distanz</span></div></button>
       <button data-act="gym" data-date="${d}"><span class="mi" style="background:rgba(255,79,163,.15);color:var(--gym)">GYM</span><div><b>Gym-Session</b><span>Übungen, Sätze, Gewicht</span></div></button>
     </div>`);
 }
 
-function sheetTest(date) {
+function sheetTest(ex, date) {
+  ex = ex || 'pu';
   const d = date || todayIso();
   openSheet(`<div class="kicker"><span>Max-Test</span></div>
-    <div class="h1">Wie viele am Stück?</div>
+    ${exSeg('test', ex, d)}
+    <input type="hidden" id="testEx" value="${ex}">
+    <div class="h1">Wie viele ${EX[ex].name} am Stück?</div>
     <p class="muted small">Nur saubere Wiederholungen zählen.</p>
     <div class="field" style="margin-top:14px"><div class="stepper">
       <button data-act="step" data-t="#testMax" data-v="-1">−</button>
-      <input class="input big" id="testMax" type="number" inputmode="numeric" value="${latestMax() || 20}">
+      <input class="input big" id="testMax" type="number" inputmode="numeric" value="${latestMax(ex) || (ex === 'pull' ? 5 : 20)}">
       <button data-act="step" data-t="#testMax" data-v="1">+</button>
     </div></div>
     <div class="field"><label>Datum</label><input class="input" type="date" id="testDate" value="${d}"></div>
-    <button class="btn solid block" data-act="save-test">Speichern</button>`);
+    <button class="btn ${ex} solid block" data-act="save-test">Speichern</button>`);
 }
 
-function sheetFree(date) {
+function sheetFree(ex, date) {
+  ex = ex || 'pu';
   const d = date || todayIso();
-  openSheet(`<div class="kicker"><span>Liegestütze</span></div>
-    <div class="h1">Sätze eintragen</div>
+  openSheet(`<div class="kicker"><span>Sätze eintragen</span></div>
+    ${exSeg('free', ex, d)}
+    <input type="hidden" id="freeEx" value="${ex}">
+    <div class="h1">${EX[ex].name}</div>
     <p class="muted small">Wiederholungen pro Satz, mit Leerzeichen oder Komma getrennt.</p>
-    <div class="field" style="margin-top:14px"><label>Sätze</label><input class="input big" id="freeSets" inputmode="text" placeholder="25 20 20 15"></div>
+    <div class="field" style="margin-top:14px"><label>Sätze</label><input class="input big" id="freeSets" inputmode="text" placeholder="${ex === 'pull' ? '8 6 6 5' : '25 20 20 15'}"></div>
     <div class="preview" id="freePreview"></div>
     <div class="field" style="margin-top:12px"><label>Datum</label><input class="input" type="date" id="freeDate" value="${d}"></div>
-    <button class="btn solid block" data-act="save-free">Speichern</button>`);
+    <button class="btn ${ex} solid block" data-act="save-free">Speichern</button>`);
 }
 
 function sheetCardio(type, dist, date) {
@@ -593,9 +748,9 @@ function sheetCardio(type, dist, date) {
     <button class="btn ${type} solid block" data-act="save-cardio">Speichern</button>`);
 }
 
-function sheetEditSet(i) {
-  const x = state.draft.sets[i];
-  openSheet(`<div class="kicker"><span>Satz ${i + 1}</span><span>Ziel: ${x.t}</span></div>
+function sheetEditSet(ex, i) {
+  const x = state.drafts[ex].sets[i];
+  openSheet(`<div class="kicker"><span>${EX[ex].name} · Satz ${i + 1}</span><span>Ziel: ${x.t}</span></div>
     <div class="h1">Wie viele geschafft?</div>
     <div class="field" style="margin-top:14px"><div class="stepper">
       <button data-act="step" data-t="#setReps" data-v="-1">−</button>
@@ -603,8 +758,8 @@ function sheetEditSet(i) {
       <button data-act="step" data-t="#setReps" data-v="1">+</button>
     </div></div>
     <div class="row">
-      <button class="btn ghost grow" data-act="set-undo" data-i="${i}">Nicht erledigt</button>
-      <button class="btn solid grow" data-act="set-save" data-i="${i}">Übernehmen</button>
+      <button class="btn ghost grow" data-act="set-undo" data-ex="${ex}" data-i="${i}">Nicht erledigt</button>
+      <button class="btn ${ex} solid grow" data-act="set-save" data-ex="${ex}" data-i="${i}">Übernehmen</button>
     </div>`);
 }
 
@@ -620,6 +775,135 @@ function updateCardioPreview() {
   p.textContent = txt;
   p.style.color = b && sec < b.time ? 'var(--gold)' : '';
   $('#cBest').textContent = b ? `Rekord: ${fmtTime(b.time)}` : 'Erster Eintrag';
+}
+
+/* ================= Timed sheet + stopwatch ================= */
+let timedForm = null;
+const sw = { running: false, t0: 0, acc: 0, int: null };
+const swElapsed = () => sw.acc + (sw.running ? (Date.now() - sw.t0) / 1000 : 0);
+function swText() {
+  if (timedForm && timedForm.mode === 'amrap') return fmtClock(Math.max(0, timedForm.target - swElapsed()));
+  return fmtClock(swElapsed());
+}
+function swUpdateUi() {
+  const d = $('#swDisplay');
+  if (d) { d.textContent = swText(); d.classList.toggle('running', sw.running); }
+  const b = $('#swBtn');
+  if (b) b.textContent = sw.running ? 'Stopp' : sw.acc > 0 && timedForm && timedForm.mode === 'time' ? 'Weiter' : 'Start';
+}
+function swTick() {
+  if (timedForm && timedForm.mode === 'amrap' && sw.running && swElapsed() >= timedForm.target) {
+    sw.acc = timedForm.target;
+    sw.running = false;
+    clearInterval(sw.int);
+    swUpdateUi();
+    try { navigator.vibrate && navigator.vibrate([300, 100, 300]); } catch (e) {}
+    toast('Zeit! Jetzt Wiederholungen eintragen');
+    const v = $('#tValue');
+    if (v) v.focus();
+    return;
+  }
+  swUpdateUi();
+}
+function swStart() {
+  if (sw.running) return;
+  if (timedForm && timedForm.mode === 'amrap' && sw.acc >= timedForm.target) sw.acc = 0;
+  sw.running = true;
+  sw.t0 = Date.now();
+  clearInterval(sw.int);
+  sw.int = setInterval(swTick, 100);
+  swUpdateUi();
+}
+function swStop() {
+  if (!sw.running) return;
+  sw.acc += (Date.now() - sw.t0) / 1000;
+  sw.running = false;
+  clearInterval(sw.int);
+  if (timedForm && timedForm.mode === 'time') {
+    timedForm.value = fmtTime(Math.round(sw.acc * 10) / 10);
+    const inp = $('#tValue');
+    if (inp) inp.value = timedForm.value;
+    updateTimedPreview();
+  }
+  swUpdateUi();
+}
+function swReset() { sw.running = false; sw.acc = 0; clearInterval(sw.int); swUpdateUi(); }
+
+function sheetTimed(ex, mode, target, date) {
+  ex = ex || 'pu';
+  mode = mode || 'time';
+  timedForm = { ex, mode, target: target || (mode === 'time' ? EX[ex].timeReps[0] : EX[ex].amrap[0]), date: date || todayIso(), value: '' };
+  swReset();
+  renderTimedSheet();
+}
+function renderTimedSheet(focusSel) {
+  const f = timedForm, cfg = EX[f.ex];
+  const std = f.mode === 'time' ? cfg.timeReps : cfg.amrap;
+  const isStd = std.includes(f.target);
+  const b = f.target ? bestTimed(f.ex, f.mode, f.target) : null;
+  openSheet(`<div class="kicker"><span>⏱ Auf Zeit</span><span id="tBest">${b ? `Rekord: ${timedValue(b)}` : 'Noch kein Rekord'}</span></div>
+    <div class="seg">${EX_KEYS.map((k) => `<button class="${k === f.ex ? 'on ' + k : ''}" data-act="t-ex" data-ex="${k}">${EX[k].name.toUpperCase()}</button>`).join('')}</div>
+    <div class="seg">
+      <button class="${f.mode === 'time' ? 'on ' + f.ex : ''}" data-act="t-mode" data-mode="time">X WDH. AUF ZEIT</button>
+      <button class="${f.mode === 'amrap' ? 'on ' + f.ex : ''}" data-act="t-mode" data-mode="amrap">MAX IN ZEIT</button>
+    </div>
+    <div class="field"><label>${f.mode === 'time' ? 'Wiederholungen' : 'Zeitlimit'}</label>
+      <div class="chips">${std.map((v) => `<button class="chip ${v === f.target ? 'on ' + f.ex : ''}" data-act="t-target" data-v="${v}">${f.mode === 'time' ? v : fmtDur(v)}</button>`).join('')}
+        <button class="chip ${!isStd ? 'on ' + f.ex : ''}" data-act="t-target" data-v="custom">Andere</button></div>
+      <input class="input ${isStd ? 'hidden' : ''}" id="tCustom" inputmode="${f.mode === 'time' ? 'numeric' : 'decimal'}" placeholder="${f.mode === 'time' ? 'Wdh., z. B. 75' : 'Zeit, z. B. 3:00'}" value="${isStd || !f.target ? '' : f.mode === 'time' ? f.target : fmtTime(f.target)}" style="margin-top:8px">
+    </div>
+    <div class="stopwatch" style="--accent:${cfg.color}">
+      <div class="sw-display" id="swDisplay">${swText()}</div>
+      <div class="sw-hint">${f.mode === 'time' ? 'Start → Wiederholungen machen → Stopp. Die Zeit wird automatisch übernommen.' : 'Start drücken, los geht’s. Bei 0:00 vibriert das Handy – dann Wiederholungen eintragen.'}</div>
+      <div class="row"><button class="btn ghost grow" data-act="sw-reset">Reset</button><button class="btn ${f.ex} solid grow" id="swBtn" data-act="sw-toggle">Start</button></div>
+    </div>
+    ${f.mode === 'time'
+      ? `<div class="field"><label>Zeit (m:ss)</label><input class="input big" id="tValue" inputmode="decimal" placeholder="2:15.0" value="${esc(f.value)}"></div>`
+      : `<div class="field"><label>Geschafft (Wdh.)</label><div class="stepper"><button data-act="step" data-t="#tValue" data-v="-1">−</button><input class="input big" id="tValue" type="number" inputmode="numeric" value="${esc(f.value)}" placeholder="0"><button data-act="step" data-t="#tValue" data-v="1">+</button></div></div>`}
+    <div class="preview" id="tPreview"></div>
+    <div class="field" style="margin-top:12px"><label>Datum</label><input class="input" type="date" id="tDate" value="${f.date}"></div>
+    <button class="btn ${f.ex} solid block" data-act="save-timed">Speichern</button>`);
+  swUpdateUi();
+  updateTimedPreview();
+  if (focusSel) { const el = $(focusSel); if (el) el.focus(); }
+}
+function updateTimedPreview() {
+  const f = timedForm;
+  const p = $('#tPreview');
+  if (!f || !p) return;
+  const best = $('#tBest');
+  const b = f.target ? bestTimed(f.ex, f.mode, f.target) : null;
+  if (best) best.textContent = b ? `Rekord: ${timedValue(b)}` : 'Noch kein Rekord';
+  const raw = $('#tValue') ? $('#tValue').value : '';
+  const val = f.mode === 'time' ? parseTime(raw) : Math.round(+raw);
+  if (!val || !f.target) { p.textContent = ''; return; }
+  let txt = rateText({ mode: f.mode, target: f.target, value: val });
+  let gold = false;
+  if (b) {
+    if (timedBetter(f.mode, val, b.value)) { txt += ' · NEUER REKORD'; gold = true; }
+    else if (val === b.value) txt += ' · Rekord eingestellt';
+    else txt += f.mode === 'time' ? ` · +${(val - b.value).toFixed(1)}s zum Rekord` : ` · ${b.value - val} Wdh. zum Rekord`;
+  }
+  p.textContent = txt;
+  p.style.color = gold ? 'var(--gold)' : '';
+}
+function saveTimed() {
+  const f = timedForm;
+  const raw = $('#tValue').value;
+  const value = f.mode === 'time' ? parseTime(raw) : Math.round(+raw);
+  if (!f.target || f.target <= 0) return toast(f.mode === 'time' ? 'Wiederholungen wählen' : 'Zeitlimit wählen');
+  if (!value || value <= 0) return toast(f.mode === 'time' ? 'Zeit im Format m:ss eingeben' : 'Wiederholungen eintragen');
+  const prev = bestTimed(f.ex, f.mode, f.target);
+  const entry = { id: uid(), date: $('#tDate').value || todayIso(), ex: f.ex, mode: f.mode, target: f.target, value };
+  state.timed.push(entry);
+  timedForm = null;
+  closeSheet();
+  cardioType = 'body';
+  save();
+  if (!prev || timedBetter(entry.mode, value, prev.value)) {
+    const diff = prev ? (entry.mode === 'time' ? ` · −${(prev.value - value).toFixed(1)}s` : ` · +${value - prev.value}`) : ' · erster Rekord';
+    showPR(timedValue(entry), `${timedLabel(entry.ex, entry.mode, entry.target)}${diff}`);
+  } else toast(`Gespeichert · ${timedValue(entry)}`);
 }
 
 /* ================= Gym ================= */
@@ -775,33 +1059,35 @@ function saveGym() {
 }
 
 /* ================= Settings (gear) ================= */
-const GOAL_PRESETS = [100, 200, 300, 500, 1000];
 let settingsForm = null; // unsaved goal edits while the sheet is open
 
 function sheetSettings() {
+  if (!settingsForm) settingsForm = Object.fromEntries(EX_KEYS.map((k) => [k, { ...goalOf(k) }]));
   const st = state.settings;
-  if (!settingsForm) settingsForm = { goal: st.goal, goalDate: st.goalDate };
-  const f = settingsForm;
   const scroll = $('#sheetPanel').scrollTop;
   openSheet(`<div class="kicker"><span>⚙ Einstellungen</span></div>
     <div class="h2" style="margin-top:4px">ZIELE</div>
-    <div class="card">
-      <div class="field"><label>Liegestütze in einer Einheit</label>
-        <div class="stepper">
-          <button data-act="goal-step" data-v="-10">−</button>
-          <input class="input big" id="sGoal" type="number" inputmode="numeric" value="${f.goal}">
-          <button data-act="goal-step" data-v="10">+</button>
+    ${EX_KEYS.map((k) => {
+      const f = settingsForm[k], cfg = EX[k], cur = goalOf(k);
+      return `<div class="card" style="--accent:${cfg.color}">
+        <div class="field"><label>${cfg.name} in einer Einheit</label>
+          <div class="stepper">
+            <button data-act="goal-step" data-ex="${k}" data-v="-${cfg.step}">−</button>
+            <input class="input big" id="sGoal-${k}" data-goal-ex="${k}" type="number" inputmode="numeric" value="${f.goal}">
+            <button data-act="goal-step" data-ex="${k}" data-v="${cfg.step}">+</button>
+          </div>
         </div>
-      </div>
-      <div class="chips" style="margin-bottom:14px">${GOAL_PRESETS.map((v) => `<button class="chip ${f.goal === v ? 'on' : ''}" data-act="goal-preset" data-v="${v}">${v}</button>`).join('')}</div>
-      <div class="field"><label>Bis wann</label><input class="input" type="date" id="sGoalDate" value="${f.goalDate}"></div>
-      <div class="preview" id="goalPreview" style="margin-bottom:12px"></div>
-      <button class="btn solid block" data-act="save-goal">Ziel übernehmen</button>
-      <p class="muted small" style="margin-top:8px">Aktuell: ${st.goal} bis ${fmtShort(st.goalDate)} – deine Einträge bleiben erhalten, nur der Plan wird neu berechnet.</p>
-    </div>
+        <div class="chips" style="margin-bottom:14px">${cfg.presets.map((v) => `<button class="chip ${f.goal === v ? 'on ' + k : ''}" data-act="goal-preset" data-ex="${k}" data-v="${v}">${v}</button>`).join('')}</div>
+        <div class="field"><label>Bis wann</label><input class="input" type="date" id="sGoalDate-${k}" data-goaldate-ex="${k}" value="${f.goalDate}"></div>
+        <div class="preview" id="goalPreview-${k}"></div>
+        <p class="muted small" style="margin-top:6px">Aktuell: ${cur.goal} bis ${fmtShort(cur.goalDate)}</p>
+      </div>`;
+    }).join('')}
+    <button class="btn solid block" data-act="save-goal">Ziele übernehmen</button>
+    <p class="muted small" style="margin-top:8px">Deine Einträge bleiben erhalten, nur die Pläne werden neu berechnet.</p>
     <div class="h2">TRAINING</div>
     <div class="card">
-      <div class="field" style="margin:0"><label>Trainingstage</label>
+      <div class="field" style="margin:0"><label>Trainingstage (Liegestütze &amp; Klimmzüge)</label>
         <div class="days">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="day-tog ${st.days.includes(d) ? 'on' : ''}" data-act="day" data-d="${d}">${WD[d]}</button>`).join('')}</div>
       </div>
     </div>
@@ -814,16 +1100,16 @@ function sheetSettings() {
       </div>
     </div>`);
   $('#sheetPanel').scrollTop = scroll;
-  updateGoalPreview();
+  EX_KEYS.forEach(updateGoalPreview);
 }
 
-function updateGoalPreview() {
-  const f = settingsForm;
-  const el = $('#goalPreview');
+function updateGoalPreview(ex) {
+  const f = settingsForm[ex];
+  const el = $(`#goalPreview-${ex}`);
   if (!el) return;
   const days = f.goalDate ? diffDays(todayIso(), f.goalDate) : NaN;
   if (!(f.goal > 0) || !(days > 0)) { el.textContent = 'Ziel und ein Datum in der Zukunft wählen'; el.style.color = 'var(--bad)'; return; }
-  const m = latestMax();
+  const m = latestMax(ex);
   let txt = `${days} Tage · Generalprobe ≈ ${Math.round(f.goal * 0.88)} Reps pro Einheit`;
   // Rough sanity check: start volume is ~2.2× max set; much more than ~+60 %/week of that is a stretch.
   if (m && f.goal > m * 2.2 * (1 + (days / 7) * 0.6)) txt += ' · sehr ambitioniert';
@@ -832,18 +1118,26 @@ function updateGoalPreview() {
 }
 
 function saveGoal() {
-  const f = settingsForm;
-  const goal = Math.round(+f.goal);
-  if (!(goal >= 10)) return toast('Ziel muss mindestens 10 sein');
-  if (!f.goalDate || f.goalDate <= todayIso()) return toast('Datum muss in der Zukunft liegen');
-  const changed = goal !== state.settings.goal || f.goalDate !== state.settings.goalDate;
-  state.settings.goal = goal;
-  state.settings.goalDate = f.goalDate;
-  state.draft = null;
+  for (const k of EX_KEYS) {
+    const f = settingsForm[k];
+    if (!(Math.round(+f.goal) >= 5)) return toast(`${EX[k].name}: Ziel muss mindestens 5 sein`);
+    if (!f.goalDate || f.goalDate <= todayIso()) return toast(`${EX[k].name}: Datum muss in der Zukunft liegen`);
+  }
+  const changed = [];
+  for (const k of EX_KEYS) {
+    const f = settingsForm[k];
+    const goal = Math.round(+f.goal);
+    const cur = goalOf(k);
+    if (goal !== cur.goal || f.goalDate !== cur.goalDate) {
+      changed.push(`${goal} ${EX[k].name}`);
+      state.settings.goals[k] = { goal, goalDate: f.goalDate };
+      delete state.drafts[k];
+    }
+  }
   settingsForm = null;
   closeSheet();
   save();
-  toast(changed ? `Neues Ziel: ${goal} bis ${fmtShort(f.goalDate)} · Plan neu berechnet` : 'Ziel unverändert');
+  toast(changed.length ? `Neues Ziel: ${changed.join(' · ')} · Plan neu berechnet` : 'Ziele unverändert');
 }
 
 /* ================= Actions ================= */
@@ -866,36 +1160,41 @@ function saveCardio() {
 }
 
 function saveTest() {
-  const max = Math.round(+$('#testMax').value);
+  const ex = $('#testEx').value;
+  const rawMax = $('#testMax').value;
+  const max = Math.round(+rawMax);
   const date = $('#testDate').value || todayIso();
-  if (!max || max < 1) return toast('Zahl eingeben');
-  const prevBest = bestSet();
-  state.tests = state.tests.filter((t) => t.date !== date);
-  state.tests.push({ id: uid(), date, max });
-  if (state.draft && state.draft.date >= date) state.draft = null;
+  if (rawMax === '' || !(max >= 0)) return toast('Zahl eingeben');
+  const prevBest = bestSet(ex);
+  const first = !testsOf(ex).length;
+  state.tests = state.tests.filter((t) => !(t.ex === ex && t.date === date));
+  state.tests.push({ id: uid(), date, ex, max });
+  if (state.drafts[ex] && state.drafts[ex].date >= date) delete state.drafts[ex];
   closeSheet();
   save();
-  if (prevBest && max > prevBest) showPR(`${max}`, `Liegestütze am Stück · +${max - prevBest}`);
-  else toast(state.tests.length === 1 ? 'Plan erstellt – schau in den Plan-Tab' : 'Max-Test gespeichert · Plan angepasst');
+  if (prevBest && max > prevBest) showPR(`${max}`, `${EX[ex].name} am Stück · +${max - prevBest}`);
+  else toast(first ? `${EX[ex].name}-Plan erstellt – schau in den Plan-Tab` : 'Max-Test gespeichert · Plan angepasst');
 }
 
-function savePushups(date, sets, planned) {
+function saveSets(ex, date, sets, planned) {
   const total = sets.reduce((a, b) => a + b, 0);
-  const prevBest = bestTotal();
-  const existing = state.pushups.find((p) => p.date === date);
+  const prevBest = bestTotal(ex);
+  const { goal } = goalOf(ex);
+  const existing = state.pushups.find((p) => p.ex === ex && p.date === date);
   if (existing) { existing.sets = existing.sets.concat(sets); existing.total += total; }
-  else state.pushups.push({ id: uid(), date, sets, total, planned });
+  else state.pushups.push({ id: uid(), date, ex, sets, total, planned });
   const newTotal = existing ? existing.total : total;
   save();
-  if (newTotal >= state.settings.goal && prevBest < state.settings.goal) showPR(`${newTotal}`, 'ZIEL ERREICHT. Respekt.');
-  else if (prevBest && newTotal > prevBest) showPR(`${newTotal}`, 'Liegestütze in einer Einheit');
-  else toast(`${total} Liegestütze gespeichert`);
+  if (newTotal >= goal && prevBest < goal) showPR(`${newTotal}`, `${EX[ex].name}: ZIEL ERREICHT. Respekt.`);
+  else if (prevBest && newTotal > prevBest) showPR(`${newTotal}`, `${EX[ex].name} in einer Einheit`);
+  else toast(`${total} ${EX[ex].name} gespeichert`);
 }
 
 function deleteEntry(kind, id) {
   if (!confirm('Eintrag löschen?')) return;
-  if (kind === 'pu') state.pushups = state.pushups.filter((x) => x.id !== id);
+  if (kind === 'sess') state.pushups = state.pushups.filter((x) => x.id !== id);
   else if (kind === 'test') state.tests = state.tests.filter((x) => x.id !== id);
+  else if (kind === 'timed') state.timed = state.timed.filter((x) => x.id !== id);
   else if (kind === 'gym') state.gym = state.gym.filter((x) => x.id !== id);
   else state.cardio = state.cardio.filter((x) => x.id !== id);
   save();
@@ -952,37 +1251,34 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('#pr')) return $('#pr').classList.add('hidden');
   const b = e.target.closest('[data-act]');
   if (!b) return;
-  const { act } = b.dataset;
-  const plan = getPlan();
+  const { act, ex } = b.dataset;
 
   switch (act) {
     case 'close': closeSheet(); break;
     case 'add': sheetAdd(b.dataset.date); break;
-    case 'test': sheetTest(b.dataset.date); break;
-    case 'free': sheetFree(b.dataset.date); break;
+    case 'test': sheetTest(ex, b.dataset.date); break;
+    case 'free': sheetFree(ex, b.dataset.date); break;
     case 'cardio': sheetCardio(b.dataset.type, b.dataset.dist ? +b.dataset.dist : null, b.dataset.date); break;
     case 'step': {
       const inp = $(b.dataset.t);
       inp.value = Math.max(0, (+inp.value || 0) + +b.dataset.v);
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
       break;
     }
     case 'save-test': saveTest(); break;
     case 'save-free': {
+      const fx = $('#freeEx').value;
       const sets = ($('#freeSets').value.match(/\d+/g) || []).map(Number).filter((n) => n > 0);
       if (!sets.length) return toast('Mindestens einen Satz eingeben');
       const date = $('#freeDate').value || todayIso();
       closeSheet();
-      savePushups(date, sets, plan.some((s) => s.date === date));
+      saveSets(fx, date, sets, getPlan(fx).some((s) => s.date === date));
       break;
     }
-    case 'c-switch': {
-      const date = $('#cDate').value;
-      sheetCardio(b.dataset.type, null, date);
-      break;
-    }
+    case 'c-switch': sheetCardio(b.dataset.type, null, $('#cDate').value); break;
     case 'c-dist': {
       const type = $('#cType').value;
-      document.querySelectorAll('#cChips .chip').forEach((c) => c.className = 'chip');
+      document.querySelectorAll('#cChips .chip').forEach((c) => (c.className = 'chip'));
       b.className = `chip on ${type}`;
       const custom = b.dataset.dist === 'custom';
       $('#cCustom').classList.toggle('hidden', !custom);
@@ -992,6 +1288,39 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'save-cardio': saveCardio(); break;
+
+    case 'timed': sheetTimed(ex, b.dataset.mode, b.dataset.target ? +b.dataset.target : null, b.dataset.date); break;
+    case 't-ex': {
+      const f = timedForm;
+      const std = f.mode === 'time' ? EX[ex].timeReps : EX[ex].amrap;
+      f.ex = ex;
+      if (f.mode === 'time') f.target = std[0]; // rep targets differ per exercise; time limits are shared
+      f.date = $('#tDate').value || f.date;
+      swReset();
+      renderTimedSheet();
+      break;
+    }
+    case 't-mode': {
+      const f = timedForm;
+      f.mode = b.dataset.mode;
+      f.target = (f.mode === 'time' ? EX[f.ex].timeReps : EX[f.ex].amrap)[0];
+      f.value = '';
+      f.date = $('#tDate').value || f.date;
+      swReset();
+      renderTimedSheet();
+      break;
+    }
+    case 't-target': {
+      const f = timedForm;
+      f.date = $('#tDate').value || f.date;
+      if (b.dataset.v === 'custom') { f.target = 0; swReset(); renderTimedSheet('#tCustom'); }
+      else { f.target = +b.dataset.v; swReset(); renderTimedSheet(); }
+      break;
+    }
+    case 'sw-toggle': if (sw.running) swStop(); else swStart(); break;
+    case 'sw-reset': swReset(); break;
+    case 'save-timed': saveTimed(); break;
+
     case 'gym': sheetGym(b.dataset.date); break;
     case 'g-title': gymForm.title = b.dataset.v; renderGymSheet(); break;
     case 'g-copy': copyLastGym(); break;
@@ -1001,61 +1330,64 @@ document.addEventListener('click', (e) => {
       break;
     case 'g-del-ex': gymForm.exercises.splice(+b.dataset.e, 1); renderGymSheet(); break;
     case 'g-add-set': {
-      const ex = gymForm.exercises[+b.dataset.e];
-      const last = ex.sets[ex.sets.length - 1];
-      ex.sets.push({ reps: last ? last.reps : '', kg: last ? last.kg : '' });
+      const gx = gymForm.exercises[+b.dataset.e];
+      const last = gx.sets[gx.sets.length - 1];
+      gx.sets.push({ reps: last ? last.reps : '', kg: last ? last.kg : '' });
       renderGymSheet();
       break;
     }
     case 'g-del-set': {
-      const ex = gymForm.exercises[+b.dataset.e];
-      ex.sets.splice(+b.dataset.s, 1);
-      if (!ex.sets.length) ex.sets.push({ reps: '', kg: '' });
+      const gx = gymForm.exercises[+b.dataset.e];
+      gx.sets.splice(+b.dataset.s, 1);
+      if (!gx.sets.length) gx.sets.push({ reps: '', kg: '' });
       renderGymSheet();
       break;
     }
     case 'save-gym': saveGym(); break;
+
     case 'settings': settingsForm = null; sheetSettings(); break;
     case 'goal-step':
-      settingsForm.goal = Math.max(10, (Math.round(+$('#sGoal').value) || 0) + +b.dataset.v);
+      settingsForm[ex].goal = Math.max(5, (Math.round(+$(`#sGoal-${ex}`).value) || 0) + +b.dataset.v);
       sheetSettings();
       break;
-    case 'goal-preset': settingsForm.goal = +b.dataset.v; sheetSettings(); break;
+    case 'goal-preset': settingsForm[ex].goal = +b.dataset.v; sheetSettings(); break;
     case 'save-goal': saveGoal(); break;
+
     case 'set': {
       const i = +b.dataset.i;
-      const x = state.draft.sets[i];
-      if (x.done) return sheetEditSet(i);
+      const dr = state.drafts[ex];
+      const x = dr.sets[i];
+      if (x.done) return sheetEditSet(ex, i);
       x.done = true;
       persist();
-      const s = plan.find((p) => p.date === state.draft.date);
+      const s = getPlan(ex).find((p) => p.date === dr.date);
       renderHome();
-      if (state.draft.sets.every((y) => y.done)) { stopRest(); toast('Alle Sätze geschafft – jetzt speichern!'); }
-      else if (s) startRest(s.rest);
       renderCal();
+      if (dr.sets.every((y) => y.done)) { stopRest(); toast('Alle Sätze geschafft – jetzt speichern!'); }
+      else if (s) startRest(s.rest);
       break;
     }
     case 'set-save': {
-      const x = state.draft.sets[+b.dataset.i];
+      const x = state.drafts[ex].sets[+b.dataset.i];
       x.a = Math.max(0, Math.round(+$('#setReps').value || 0));
       x.done = true;
       persist(); closeSheet(); renderHome(); renderCal();
       break;
     }
     case 'set-undo': {
-      state.draft.sets[+b.dataset.i].done = false;
+      state.drafts[ex].sets[+b.dataset.i].done = false;
       persist(); closeSheet(); renderHome(); renderCal();
       break;
     }
     case 'finish': {
-      const dr = state.draft;
+      const dr = state.drafts[ex];
       const sets = dr.sets.filter((x) => x.done && x.a > 0).map((x) => x.a);
       if (!sets.length) return toast('Noch kein Satz erledigt');
       if (sets.length < dr.sets.length && !confirm(`Erst ${sets.length} von ${dr.sets.length} Sätzen erledigt. Trotzdem speichern?`)) return;
       const date = dr.date;
-      state.draft = null;
+      delete state.drafts[ex];
       stopRest();
-      savePushups(date, sets, true);
+      saveSets(ex, date, sets, true);
       break;
     }
     case 'rest-add': restEnd += 15000; restTotal += 15; tickRest(); break;
@@ -1064,7 +1396,13 @@ document.addEventListener('click', (e) => {
     case 'cal-prev': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCal(); break;
     case 'cal-next': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCal(); break;
     case 'cal-day': calSel = b.dataset.date; renderCal(); break;
-    case 'ctype': cardioType = b.dataset.type; renderCardio(); break;
+    case 'ctype':
+      cardioType = b.dataset.type;
+      renderCardio();
+      if (b.dataset.goto) switchTab('cardio');
+      break;
+    case 'goto-plan': planEx = ex; renderPlan(); switchTab('plan'); break;
+    case 'plan-ex': planEx = ex; renderPlan(); break;
     case 'day': {
       const d = +b.dataset.d;
       const days = state.settings.days;
@@ -1090,21 +1428,31 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('input', (e) => {
-  if (e.target.id === 'sGoal' && settingsForm) { settingsForm.goal = Math.round(+e.target.value) || 0; updateGoalPreview(); return; }
-  if (e.target.id === 'sGoalDate' && settingsForm) { settingsForm.goalDate = e.target.value; updateGoalPreview(); return; }
-  const g = e.target.dataset && e.target.dataset.g;
+  const t = e.target;
+  if (t.dataset.goalEx && settingsForm) { settingsForm[t.dataset.goalEx].goal = Math.round(+t.value) || 0; updateGoalPreview(t.dataset.goalEx); return; }
+  if (t.dataset.goaldateEx && settingsForm) { settingsForm[t.dataset.goaldateEx].goalDate = t.value; updateGoalPreview(t.dataset.goaldateEx); return; }
+  const g = t.dataset.g;
   if (g && gymForm) {
-    const v = e.target.value;
+    const v = t.value;
     if (g === 'title' || g === 'notes' || g === 'date') gymForm[g] = v;
-    else if (g === 'ex-name') gymForm.exercises[+e.target.dataset.e].name = v;
-    else gymForm.exercises[+e.target.dataset.e].sets[+e.target.dataset.s][g] = v;
+    else if (g === 'ex-name') gymForm.exercises[+t.dataset.e].name = v;
+    else gymForm.exercises[+t.dataset.e].sets[+t.dataset.s][g] = v;
     if (g === 'title') updateGymCopyBtn();
     return;
   }
-  if (e.target.id === 'cTime') updateCardioPreview();
-  if (e.target.id === 'cCustom') { $('#cDist').value = e.target.value; updateCardioPreview(); }
-  if (e.target.id === 'freeSets') {
-    const sets = (e.target.value.match(/\d+/g) || []).map(Number);
+  if (timedForm) {
+    if (t.id === 'tValue') { timedForm.value = t.value; updateTimedPreview(); return; }
+    if (t.id === 'tCustom') {
+      timedForm.target = timedForm.mode === 'time' ? Math.round(+t.value) || 0 : Math.round(parseTime(t.value) || 0);
+      swReset();
+      updateTimedPreview();
+      return;
+    }
+  }
+  if (t.id === 'cTime') updateCardioPreview();
+  if (t.id === 'cCustom') { $('#cDist').value = t.value; updateCardioPreview(); }
+  if (t.id === 'freeSets') {
+    const sets = (t.value.match(/\d+/g) || []).map(Number);
     $('#freePreview').textContent = sets.length ? `${sets.length} Sätze · ${sets.reduce((a, b) => a + b, 0)} Reps` : '';
   }
 });
@@ -1117,7 +1465,8 @@ document.addEventListener('change', (e) => {
       const data = JSON.parse(txt);
       if (!data.settings || !Array.isArray(data.cardio)) throw new Error('bad');
       if (!confirm('Backup laden? Aktuelle Daten werden ersetzt.')) return;
-      state = { ...defaults(), ...data };
+      state = migrate(data);
+      closeSheet();
       save();
       toast('Backup geladen');
     }).catch(() => toast('Datei ist kein gültiges APEX-Backup'));
@@ -1128,7 +1477,7 @@ document.addEventListener('change', (e) => {
 // Refresh when the app comes back to the foreground on a new day.
 let lastDay = todayIso();
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && todayIso() !== lastDay) { lastDay = todayIso(); planCache = null; render(); }
+  if (!document.hidden && todayIso() !== lastDay) { lastDay = todayIso(); planCache = {}; render(); }
 });
 
 render();
