@@ -307,7 +307,19 @@ ul.rules li { margin: 4px 0; }
 }
 .input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 15%, transparent); }
 .input.big { font-family: var(--font-hud); font-size: 26px; text-align: center; letter-spacing: 2px; }
-input[type="date"].input { min-height: 48px; color-scheme: dark; }
+/* iOS gives date inputs an intrinsic min width that overflows narrow columns */
+input[type="date"].input { min-height: 48px; color-scheme: dark; min-width: 0; max-width: 100%; display: block; -webkit-appearance: none; appearance: none; text-align: left; }
+input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
+.field, .row > *, .pair > * { min-width: 0; }
+.input { min-width: 0; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) 104px; gap: 10px; }
+
+/* Std / Min / Sek */
+.tfields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tfields.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tf { position: relative; display: block; margin: 0 !important; }
+.tf .input.big { padding: 12px 6px 22px; font-size: 24px; }
+.tf span { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-family: var(--font-hud); font-size: 9px; letter-spacing: 2px; color: var(--muted); pointer-events: none; text-transform: uppercase; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line-2); background: transparent;

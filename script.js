@@ -68,6 +68,35 @@ function parseTime(str) {
   const sec = parts.reduce((acc, p) => acc * 60 + parseFloat(p), 0);
   return sec > 0 ? sec : null;
 }
+// Separate Std / Min / Sek fields. Text inputs with numeric keypads, because
+// iOS number pads have no colon and type=number rejects a decimal comma.
+function splitTime(sec) {
+  if (!(sec > 0)) return { h: '', m: '', s: '' };
+  const t = Math.round(sec * 10) / 10;
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t - h * 3600) / 60);
+  const r = Math.round((t - h * 3600 - m * 60) * 10) / 10;
+  return { h: h ? String(h) : '', m: String(m), s: String(r).replace('.', ',') };
+}
+function timeFields(prefix, sec, hours = true) {
+  const v = splitTime(sec);
+  const box = (id, val, unit, mode, ph) => `<label class="tf"><input class="input big" id="${prefix}${id}" data-tf="${prefix}" type="text" inputmode="${mode}" autocomplete="off" value="${val}" placeholder="${ph}"><span>${unit}</span></label>`;
+  return `<div class="tfields ${hours ? '' : 'two'}">${hours ? box('H', v.h, 'Std', 'numeric', '0') : ''}${box('M', v.m, 'Min', 'numeric', '0')}${box('S', v.s, 'Sek', 'decimal', '00')}</div>`;
+}
+function readTime(prefix) {
+  const num = (id) => {
+    const el = $(`#${prefix}${id}`);
+    if (!el) return 0;
+    const n = parseFloat(el.value.trim().replace(',', '.'));
+    return isFinite(n) && n > 0 ? n : 0;
+  };
+  const sec = num('H') * 3600 + num('M') * 60 + num('S');
+  return sec > 0 ? Math.round(sec * 10) / 10 : null;
+}
+function setTime(prefix, sec) {
+  const v = splitTime(sec);
+  ['H', 'M', 'S'].forEach((k) => { const el = $(`#${prefix}${k}`); if (el) el.value = v[k.toLowerCase()]; });
+}
 const fmtDur = (sec) => (sec % 60 === 0 ? `${sec / 60} Min` : fmtTime(sec));
 const fmtDist = (m) => (m >= 1000 ? `${+(m / 1000).toFixed(2)} km` : `${m} m`);
 function paceText(type, dist, sec) {
@@ -738,11 +767,11 @@ function sheetCardio(type, dist, date) {
       <input class="input ${isStd ? 'hidden' : ''}" id="cCustom" type="number" inputmode="numeric" placeholder="Meter, z. B. 3000" value="${isStd ? '' : dist}" style="margin-top:8px">
       <input type="hidden" id="cDist" value="${dist}">
     </div>
-    <div class="field"><label>Zeit (m:ss oder h:mm:ss)</label><input class="input big" id="cTime" inputmode="decimal" placeholder="${type === 'ski' ? '7:45.3' : '22:30'}"></div>
+    <div class="field"><label>Zeit</label>${timeFields('c')}</div>
     <div class="preview" id="cPreview"></div>
-    <div class="row" style="margin-top:12px">
-      <div class="field grow"><label>Datum</label><input class="input" type="date" id="cDate" value="${d}"></div>
-      <div class="field" style="width:110px"><label>Ø Watt</label><input class="input" type="number" inputmode="numeric" id="cWatts" placeholder="opt."></div>
+    <div class="pair" style="margin-top:12px">
+      <div class="field"><label>Datum</label><input class="input" type="date" id="cDate" value="${d}"></div>
+      <div class="field"><label>Ø Watt</label><input class="input" type="text" inputmode="numeric" id="cWatts" placeholder="opt."></div>
     </div>
     <div class="field"><label>Notiz</label><input class="input" id="cNotes" placeholder="optional"></div>
     <button class="btn ${type} solid block" data-act="save-cardio">Speichern</button>`);
@@ -766,7 +795,7 @@ function sheetEditSet(ex, i) {
 function updateCardioPreview() {
   const type = $('#cType').value;
   const dist = +$('#cDist').value;
-  const sec = parseTime($('#cTime').value);
+  const sec = readTime('c');
   const p = $('#cPreview');
   if (!sec || !dist) { p.textContent = ''; return; }
   const b = bestOf(type, dist);
@@ -820,9 +849,8 @@ function swStop() {
   sw.running = false;
   clearInterval(sw.int);
   if (timedForm && timedForm.mode === 'time') {
-    timedForm.value = fmtTime(Math.round(sw.acc * 10) / 10);
-    const inp = $('#tValue');
-    if (inp) inp.value = timedForm.value;
+    timedForm.value = Math.round(sw.acc * 10) / 10;
+    setTime('tt', timedForm.value);
     updateTimedPreview();
   }
   swUpdateUi();
@@ -850,7 +878,9 @@ function renderTimedSheet(focusSel) {
     <div class="field"><label>${f.mode === 'time' ? 'Wiederholungen' : 'Zeitlimit'}</label>
       <div class="chips">${std.map((v) => `<button class="chip ${v === f.target ? 'on ' + f.ex : ''}" data-act="t-target" data-v="${v}">${f.mode === 'time' ? v : fmtDur(v)}</button>`).join('')}
         <button class="chip ${!isStd ? 'on ' + f.ex : ''}" data-act="t-target" data-v="custom">Andere</button></div>
-      <input class="input ${isStd ? 'hidden' : ''}" id="tCustom" inputmode="${f.mode === 'time' ? 'numeric' : 'decimal'}" placeholder="${f.mode === 'time' ? 'Wdh., z. B. 75' : 'Zeit, z. B. 3:00'}" value="${isStd || !f.target ? '' : f.mode === 'time' ? f.target : fmtTime(f.target)}" style="margin-top:8px">
+      ${isStd ? '' : f.mode === 'time'
+        ? `<input class="input" id="tCustom" type="text" inputmode="numeric" placeholder="Wdh., z. B. 75" value="${f.target || ''}" style="margin-top:8px">`
+        : `<div style="margin-top:8px">${timeFields('tc', f.target, false)}</div>`}
     </div>
     <div class="stopwatch" style="--accent:${cfg.color}">
       <div class="sw-display" id="swDisplay">${swText()}</div>
@@ -858,7 +888,7 @@ function renderTimedSheet(focusSel) {
       <div class="row"><button class="btn ghost grow" data-act="sw-reset">Reset</button><button class="btn ${f.ex} solid grow" id="swBtn" data-act="sw-toggle">Start</button></div>
     </div>
     ${f.mode === 'time'
-      ? `<div class="field"><label>Zeit (m:ss)</label><input class="input big" id="tValue" inputmode="decimal" placeholder="2:15.0" value="${esc(f.value)}"></div>`
+      ? `<div class="field"><label>Zeit</label>${timeFields('tt', f.value)}</div>`
       : `<div class="field"><label>Geschafft (Wdh.)</label><div class="stepper"><button data-act="step" data-t="#tValue" data-v="-1">−</button><input class="input big" id="tValue" type="number" inputmode="numeric" value="${esc(f.value)}" placeholder="0"><button data-act="step" data-t="#tValue" data-v="1">+</button></div></div>`}
     <div class="preview" id="tPreview"></div>
     <div class="field" style="margin-top:12px"><label>Datum</label><input class="input" type="date" id="tDate" value="${f.date}"></div>
@@ -874,8 +904,7 @@ function updateTimedPreview() {
   const best = $('#tBest');
   const b = f.target ? bestTimed(f.ex, f.mode, f.target) : null;
   if (best) best.textContent = b ? `Rekord: ${timedValue(b)}` : 'Noch kein Rekord';
-  const raw = $('#tValue') ? $('#tValue').value : '';
-  const val = f.mode === 'time' ? parseTime(raw) : Math.round(+raw);
+  const val = readTimedValue();
   if (!val || !f.target) { p.textContent = ''; return; }
   let txt = rateText({ mode: f.mode, target: f.target, value: val });
   let gold = false;
@@ -887,12 +916,16 @@ function updateTimedPreview() {
   p.textContent = txt;
   p.style.color = gold ? 'var(--gold)' : '';
 }
+function readTimedValue() {
+  if (timedForm.mode === 'time') return readTime('tt');
+  const el = $('#tValue');
+  return el ? Math.round(+el.value) : 0;
+}
 function saveTimed() {
   const f = timedForm;
-  const raw = $('#tValue').value;
-  const value = f.mode === 'time' ? parseTime(raw) : Math.round(+raw);
+  const value = readTimedValue();
   if (!f.target || f.target <= 0) return toast(f.mode === 'time' ? 'Wiederholungen wählen' : 'Zeitlimit wählen');
-  if (!value || value <= 0) return toast(f.mode === 'time' ? 'Zeit im Format m:ss eingeben' : 'Wiederholungen eintragen');
+  if (!value || value <= 0) return toast(f.mode === 'time' ? 'Zeit eintragen (Min und Sek)' : 'Wiederholungen eintragen');
   const prev = bestTimed(f.ex, f.mode, f.target);
   const entry = { id: uid(), date: $('#tDate').value || todayIso(), ex: f.ex, mode: f.mode, target: f.target, value };
   state.timed.push(entry);
@@ -1153,12 +1186,12 @@ function saveGoal() {
 function saveCardio() {
   const type = $('#cType').value;
   const dist = Math.round(+$('#cDist').value);
-  const time = parseTime($('#cTime').value);
+  const time = readTime('c');
   const date = $('#cDate').value || todayIso();
   if (!dist || dist <= 0) return toast('Distanz fehlt');
-  if (!time) return toast('Zeit im Format m:ss eingeben');
+  if (!time) return toast('Zeit eintragen (Min und Sek)');
   const prev = bestOf(type, dist);
-  const entry = { id: uid(), date, type, dist, time, watts: +$('#cWatts').value || null, notes: $('#cNotes').value.trim() };
+  const entry = { id: uid(), date, type, dist, time, watts: Math.round(+$('#cWatts').value.replace(',', '.')) || null, notes: $('#cNotes').value.trim() };
   state.cardio.push(entry);
   closeSheet();
   cardioType = type;
@@ -1322,7 +1355,7 @@ document.addEventListener('click', (e) => {
     case 't-target': {
       const f = timedForm;
       f.date = $('#tDate').value || f.date;
-      if (b.dataset.v === 'custom') { f.target = 0; swReset(); renderTimedSheet('#tCustom'); }
+      if (b.dataset.v === 'custom') { f.target = 0; swReset(); renderTimedSheet(f.mode === 'time' ? '#tCustom' : '#tcM'); }
       else { f.target = +b.dataset.v; swReset(); renderTimedSheet(); }
       break;
     }
@@ -1458,14 +1491,11 @@ document.addEventListener('input', (e) => {
   }
   if (timedForm) {
     if (t.id === 'tValue') { timedForm.value = t.value; updateTimedPreview(); return; }
-    if (t.id === 'tCustom') {
-      timedForm.target = timedForm.mode === 'time' ? Math.round(+t.value) || 0 : Math.round(parseTime(t.value) || 0);
-      swReset();
-      updateTimedPreview();
-      return;
-    }
+    if (t.dataset.tf === 'tt') { timedForm.value = readTime('tt') || ''; updateTimedPreview(); return; }
+    if (t.id === 'tCustom') { timedForm.target = Math.round(+t.value) || 0; swReset(); updateTimedPreview(); return; }
+    if (t.dataset.tf === 'tc') { timedForm.target = Math.round(readTime('tc') || 0); swReset(); updateTimedPreview(); return; }
   }
-  if (t.id === 'cTime') updateCardioPreview();
+  if (t.dataset.tf === 'c') updateCardioPreview();
   if (t.id === 'cCustom') { $('#cDist').value = t.value; updateCardioPreview(); }
   if (t.id === 'freeSets') {
     const sets = (t.value.match(/\d+/g) || []).map(Number);
