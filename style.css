@@ -12,6 +12,7 @@
   --bike: #a77bff;
   --ok: #6dff9c;
   --gold: #ffd54a;
+  --swim: #4da6ff;
   --gym: #ff4fa3;
   --pull: #b6ff3d;
   --bad: #ff5470;
@@ -489,3 +490,30 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .ftp-tile { display: block; width: 100%; margin-bottom: 10px; }
 .ftp-tile .tile-time { font-size: 30px; }
 .pair-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* ===== Wochenplan ===== */
+.units { display: flex; flex-wrap: wrap; gap: 6px; }
+.unit {
+  padding: 8px 12px; border-radius: 999px; font-family: var(--font-hud); font-size: 11px; letter-spacing: 1px;
+  border: 1px solid color-mix(in srgb, var(--uc) 45%, transparent);
+  background: color-mix(in srgb, var(--uc) 10%, transparent); color: var(--uc);
+}
+.unit.done { background: var(--uc); border-color: var(--uc); color: var(--bg); box-shadow: 0 0 10px color-mix(in srgb, var(--uc) 45%, transparent); }
+.wk-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.wk-day { display: grid; justify-items: center; align-content: start; gap: 5px; padding: 5px 0; border-radius: 8px; font-family: var(--font-hud); font-size: 9px; color: var(--muted); }
+.wk-day.today { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 10%, transparent); }
+.wk-bars { display: flex; flex-direction: column; gap: 2px; width: 70%; min-height: 12px; }
+.wk-bars i { height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--uc) 35%, transparent); }
+.wk-bars i.done { background: var(--uc); box-shadow: 0 0 4px var(--uc); }
+.wk-bars em { font-style: normal; text-align: center; color: var(--dim); }
+.wk-row { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; align-items: center; padding: 12px; border-bottom: 1px solid var(--line); }
+.wk-row:last-child { border-bottom: 0; }
+.wk-row.today { background: color-mix(in srgb, var(--cyan) 7%, transparent); }
+.wk-name { display: grid; font-family: var(--font-hud); font-weight: 700; font-size: 13px; }
+.wk-name small { font-family: var(--font); font-weight: 500; font-size: 12px; color: var(--muted); }
+.wk-edit { border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 10px; background: var(--panel-2); }
+.wk-edit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.wk-edit-head .muted { text-align: right; }
+.wk-edit .chip.on { border-color: var(--uc); color: var(--uc); background: color-mix(in srgb, var(--uc) 14%, transparent); }
+.link { border: 0; background: none; padding: 0; color: var(--cyan); font-family: var(--font-hud); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }
+.seg.three button { font-size: 10px; letter-spacing: 1px; padding: 10px 2px; }

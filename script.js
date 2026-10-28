@@ -26,6 +26,35 @@ const EX = {
 };
 const EX_KEYS = Object.keys(EX);
 
+// Weekly schedule: which units happen on which weekday (JS getDay: 0 = So).
+const UNITS = {
+  push: { name: 'Push', color: 'var(--gym)', kind: 'gym' },
+  pull: { name: 'Pull', color: 'var(--gym)', kind: 'gym' },
+  chestback: { name: 'Brust/Rücken', color: 'var(--gym)', kind: 'gym' },
+  arms: { name: 'Arme', color: 'var(--gym)', kind: 'gym' },
+  legs: { name: 'Beine', color: 'var(--gym)', kind: 'gym' },
+  ski_hard: { name: 'SkiErg hart', color: 'var(--ski)', kind: 'ski' },
+  ski_easy: { name: 'Ski locker', color: 'var(--ski)', kind: 'ski' },
+  bike: { name: 'Rad', color: 'var(--bike)', kind: 'bike' },
+  bike_easy: { name: 'Rad locker', color: 'var(--bike)', kind: 'bike' },
+  swim: { name: 'Schwimmen', color: 'var(--swim)', kind: 'swim' },
+  apex: { name: 'APEX', color: 'var(--cyan)', kind: 'apex' }
+};
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const WD_LONG = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+const DEFAULT_WEEK = {
+  1: ['push', 'bike', 'apex'],
+  2: [],
+  3: ['swim', 'apex'],
+  4: ['legs', 'ski_easy'],
+  5: [],
+  6: ['chestback', 'arms', 'bike_easy', 'apex'],
+  0: ['ski_hard', 'pull']
+};
+const cloneWeek = (w) => JSON.parse(JSON.stringify(w));
+// APEX (push-ups + pull-ups) is planned on exactly the days that contain the APEX unit.
+const apexDaysOf = (week) => WEEK_ORDER.filter((d) => (week[d] || []).includes('apex'));
+
 const $ = (s) => document.querySelector(s);
 const pad = (n) => String(n).padStart(2, '0');
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -109,13 +138,14 @@ function paceText(type, dist, sec) {
 function defaults() {
   const end = `${new Date().getFullYear()}-12-31`;
   return {
-    settings: { days: [1, 3, 5], goals: Object.fromEntries(EX_KEYS.map((k) => [k, { goal: EX[k].defGoal, goalDate: end }])) },
+    settings: { days: apexDaysOf(DEFAULT_WEEK), week: cloneWeek(DEFAULT_WEEK), goals: Object.fromEntries(EX_KEYS.map((k) => [k, { goal: EX[k].defGoal, goalDate: end }])) },
     tests: [],     // { id, date, ex, max }
     pushups: [],   // bodyweight sessions (name kept for old backups): { id, date, ex, sets: [n], total, planned }
     timed: [],     // { id, date, ex, mode, target, value }  mode 'time': target = reps, value = sec · 'amrap': target = sec, value = reps
     cardio: [],    // { id, date, type, dist, time, watts, notes }
     gym: [],       // { id, date, title, exercises: [{ name, sets: [{ reps, kg }] }], notes }
     ftp: [],       // bike FTP tests: { id, date, watts }
+    weekDone: {},  // weekly-plan units ticked off by hand: { 'YYYY-MM-DD': [unit] }
     drafts: {}     // per exercise: in-progress session { date, sets: [{ t, a, done }] }
   };
 }
@@ -134,6 +164,11 @@ function migrate(raw) {
   s.cardio = s.cardio || [];
   s.gym = s.gym || [];
   s.ftp = s.ftp || [];
+  s.weekDone = s.weekDone || {};
+  if (!rs.week) {
+    s.settings.week = cloneWeek(DEFAULT_WEEK);
+    s.settings.days = apexDaysOf(s.settings.week);
+  }
   s.drafts = s.drafts || {};
   if (raw.draft && !s.drafts.pu) s.drafts.pu = raw.draft;
   delete s.draft;
@@ -321,6 +356,8 @@ function renderHome() {
       <span><b>${planned.filter(isDone).length}/${planned.length}</b> Einheiten</span>
     </div>
   </div>`;
+
+  html += weekTodayCard();
 
   for (const k of EX_KEYS) {
     const { goal } = goalOf(k);
@@ -557,6 +594,7 @@ function renderBodyRecords() {
 let planEx = 'pu';
 function renderPlan() {
   const el = $('#view-plan');
+  if (planEx === 'week') { el.innerHTML = planSeg() + renderWeekPlan(); return; }
   const ex = planEx, cfg = EX[ex];
   const { goal, goalDate } = goalOf(ex);
   const plan = getPlan(ex);
@@ -564,7 +602,7 @@ function renderPlan() {
   const m = latestMax(ex);
   const ratio = m / goal;
 
-  let html = `<div class="seg">${EX_KEYS.map((k) => `<button class="${k === ex ? 'on ' + k : ''}" data-act="plan-ex" data-ex="${k}">${EX[k].name.toUpperCase()}</button>`).join('')}</div>
+  let html = `${planSeg()}
   <div class="card" style="--accent:${cfg.color}">
     <div class="kicker"><span>Strategie · ${cfg.name}</span><span>${goal} bis ${fmtShort(goalDate)}</span></div>
     <div class="h1">So schaffst du ${goal}</div>
@@ -672,6 +710,7 @@ function renderCal() {
   </div>`;
 
   html += `<div class="h2">${fmtDate(calSel).toUpperCase()}</div>`;
+  html += weekDayCard(calSel);
   const ps = planBy[calSel] || [];
   ps.forEach((s) => (html += sessionCard(s, calSel === today)));
   const items = recentActivity().filter((it) => it.date === calSel);
@@ -821,6 +860,101 @@ function updateCardioPreview() {
   p.textContent = txt;
   p.style.color = b && sec < b.time ? 'var(--gold)' : '';
   $('#cBest').textContent = b ? `Rekord: ${fmtTime(b.time)}` : 'Erster Eintrag';
+}
+
+/* ================= Wochenplan ================= */
+let weekForm = null; // unsaved edits while the sheet is open
+const weekUnitsFor = (d) => state.settings.week[parse(d).getDay()] || [];
+const weekStartOf = (d) => addDays(d, -((parse(d).getDay() + 6) % 7));
+
+// Done if something matching was logged that day, or ticked off by hand.
+function unitDone(u, d) {
+  if ((state.weekDone[d] || []).includes(u)) return true;
+  const kind = UNITS[u].kind;
+  if (kind === 'gym') return state.gym.some((g) => g.date === d);
+  if (kind === 'ski') return state.cardio.some((c) => c.date === d && c.type === 'ski');
+  if (kind === 'bike') return state.cardio.some((c) => c.date === d && c.type === 'bike') || state.ftp.some((f) => f.date === d);
+  if (kind === 'apex') {
+    const planned = EX_KEYS.map((k) => getPlan(k).find((s) => s.date === d)).filter(Boolean);
+    if (planned.length) return planned.every(isDone);
+    return state.pushups.some((p) => p.date === d) || state.tests.some((t) => t.date === d);
+  }
+  return false;
+}
+
+const planSeg = () => `<div class="seg three">${[...EX_KEYS.map((k) => [k, EX[k].name.toUpperCase()]), ['week', 'WOCHE']]
+  .map(([k, label]) => `<button class="${k === planEx ? 'on ' + k : ''}" data-act="plan-ex" data-ex="${k}">${label}</button>`).join('')}</div>`;
+
+function unitChip(u, d) {
+  const done = unitDone(u, d);
+  return `<button class="unit ${done ? 'done' : ''}" data-act="week-toggle" data-u="${u}" data-date="${d}" style="--uc:${UNITS[u].color}">${done ? '✓ ' : ''}${UNITS[u].name}</button>`;
+}
+const unitList = (us, d) => (us.length ? `<div class="units">${us.map((u) => unitChip(u, d)).join('')}</div>` : '<p class="muted" style="margin:0">Pause</p>');
+
+function weekTodayCard() {
+  const today = todayIso();
+  const units = weekUnitsFor(today);
+  const ws = weekStartOf(today);
+  const strip = WEEK_ORDER.map((dow, i) => {
+    const d = addDays(ws, i);
+    const us = state.settings.week[dow] || [];
+    return `<div class="wk-day ${d === today ? 'today' : ''}"><span>${WD[dow]}</span><div class="wk-bars">${us.length
+      ? us.map((u) => `<i class="${unitDone(u, d) ? 'done' : ''}" style="--uc:${UNITS[u].color}"></i>`).join('')
+      : '<em>–</em>'}</div></div>`;
+  }).join('');
+  return `<div class="card">
+    <div class="kicker"><span>Wochenplan · Heute</span><button class="link" data-act="plan-ex" data-ex="week" data-goto="1">Woche ›</button></div>
+    ${units.length ? unitList(units, today) : '<div class="h1" style="font-size:16px">Ruhetag laut Wochenplan</div>'}
+    <div class="wk-strip">${strip}</div>
+  </div>`;
+}
+
+function weekDayCard(d) {
+  return `<div class="card"><div class="kicker"><span>Wochenplan · ${WD_LONG[parse(d).getDay()]}</span></div>${unitList(weekUnitsFor(d), d)}</div>`;
+}
+
+function renderWeekPlan() {
+  const today = todayIso();
+  const ws = weekStartOf(today);
+  const rows = WEEK_ORDER.map((dow, i) => {
+    const d = addDays(ws, i);
+    return `<div class="wk-row ${d === today ? 'today' : ''}">
+      <div class="wk-name">${WD[dow]}<small>${fmtShort(d)}</small></div>
+      ${unitList(state.settings.week[dow] || [], d)}
+    </div>`;
+  }).join('');
+  return `<div class="card plan-card">${rows}</div>
+    <p class="muted small" style="margin:4px 2px 14px">Reihenfolge wie angezeigt: links zuerst. Tippen hakt eine Einheit ab – Gym, SkiErg, Rad und APEX werden automatisch erkannt, sobald du sie einträgst.</p>
+    <button class="btn ghost block" data-act="week-edit">Wochenplan bearbeiten</button>`;
+}
+
+function sheetWeek() {
+  if (!weekForm) weekForm = cloneWeek(state.settings.week);
+  const scroll = $('#sheetPanel').scrollTop;
+  openSheet(`<div class="kicker"><span>Wochenplan bearbeiten</span></div>
+    <p class="muted small">Einheiten an- oder abtippen. Die Reihenfolge ist die, in der du sie antippst. An den Tagen mit „APEX“ plant die App deine Liegestütze &amp; Klimmzüge.</p>
+    ${WEEK_ORDER.map((dow) => {
+      const us = weekForm[dow] || [];
+      return `<div class="wk-edit">
+        <div class="wk-edit-head"><b>${WD_LONG[dow]}</b><span class="muted small">${us.length ? us.map((u) => UNITS[u].name).join(' → ') : 'Pause'}</span></div>
+        <div class="chips">${Object.keys(UNITS).map((u) => `<button class="chip ${us.includes(u) ? 'on' : ''}" data-act="wk-unit" data-d="${dow}" data-u="${u}" style="--uc:${UNITS[u].color}">${UNITS[u].name}</button>`).join('')}</div>
+      </div>`;
+    }).join('')}
+    <button class="btn solid block" data-act="save-week">Wochenplan speichern</button>
+    <button class="btn ghost block" data-act="week-reset" style="margin-top:8px">Auf meinen Standardplan zurücksetzen</button>`);
+  $('#sheetPanel').scrollTop = scroll;
+}
+
+function saveWeek() {
+  const days = apexDaysOf(weekForm);
+  if (!days.length) return toast('Mindestens ein Tag braucht „APEX“ für deine Liegestütz-/Klimmzug-Pläne');
+  state.settings.week = weekForm;
+  state.settings.days = days;
+  state.drafts = {};
+  weekForm = null;
+  closeSheet();
+  save();
+  toast(`Wochenplan gespeichert · APEX: ${days.map((d) => WD[d]).join(' · ')}`);
 }
 
 /* ================= FTP (bike) ================= */
@@ -1202,9 +1336,8 @@ function sheetSettings() {
     <p class="muted small" style="margin-top:8px">Deine Einträge bleiben erhalten, nur die Pläne werden neu berechnet.</p>
     <div class="h2">TRAINING</div>
     <div class="card">
-      <div class="field" style="margin:0"><label>Trainingstage (Liegestütze &amp; Klimmzüge)</label>
-        <div class="days">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="day-tog ${st.days.includes(d) ? 'on' : ''}" data-act="day" data-d="${d}">${WD[d]}</button>`).join('')}</div>
-      </div>
+      <p class="muted small" style="margin:0 0 10px">Liegestütze &amp; Klimmzüge (APEX) werden an den Tagen geplant, an denen dein Wochenplan „APEX“ enthält: <b style="color:var(--text)">${st.days.length ? WEEK_ORDER.filter((d) => st.days.includes(d)).map((d) => WD[d]).join(' · ') : 'keine'}</b></p>
+      <button class="btn ghost block" data-act="week-edit">Wochenplan bearbeiten</button>
     </div>
     <div class="h2">DATEN</div>
     <div class="card">
@@ -1527,7 +1660,26 @@ document.addEventListener('click', (e) => {
       if (b.dataset.goto) switchTab('cardio');
       break;
     case 'goto-plan': planEx = ex; renderPlan(); switchTab('plan'); break;
-    case 'plan-ex': planEx = ex; renderPlan(); break;
+    case 'plan-ex': planEx = ex; renderPlan(); if (b.dataset.goto) switchTab('plan'); break;
+    case 'week-toggle': {
+      const d = b.dataset.date, u = b.dataset.u;
+      const list = state.weekDone[d] || [];
+      if (!list.includes(u) && unitDone(u, d)) return toast('Automatisch erkannt – du hast dazu schon etwas eingetragen');
+      state.weekDone[d] = list.includes(u) ? list.filter((x) => x !== u) : [...list, u];
+      if (!state.weekDone[d].length) delete state.weekDone[d];
+      save();
+      break;
+    }
+    case 'week-edit': weekForm = null; sheetWeek(); break;
+    case 'wk-unit': {
+      const d = b.dataset.d, u = b.dataset.u;
+      const list = weekForm[d] || [];
+      weekForm[d] = list.includes(u) ? list.filter((x) => x !== u) : [...list, u];
+      sheetWeek();
+      break;
+    }
+    case 'week-reset': weekForm = cloneWeek(DEFAULT_WEEK); sheetWeek(); break;
+    case 'save-week': saveWeek(); break;
     case 'day': {
       const d = +b.dataset.d;
       const days = state.settings.days;
