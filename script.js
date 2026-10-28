@@ -175,6 +175,10 @@ function migrate(raw) {
   s.gym = s.gym || [];
   s.ftp = s.ftp || [];
   s.weekDone = s.weekDone || {};
+  // A short-lived version combined plyometrics + stretching into one unit; split it again.
+  const split = (list) => [...new Set((list || []).flatMap((u) => (u === 'plyo_stretch' ? ['plyo', 'stretch'] : [u])))];
+  if (rs.week) WEEK_ORDER.forEach((d) => { s.settings.week[d] = split(s.settings.week[d]); });
+  Object.keys(s.weekDone).forEach((d) => { s.weekDone[d] = split(s.weekDone[d]); });
   if (!rs.week || OLD_DEFAULT_WEEKS.some((w) => sameWeek(rs.week, w))) {
     s.settings.week = cloneWeek(DEFAULT_WEEK);
     s.settings.days = apexDaysOf(s.settings.week);
