@@ -48,16 +48,17 @@ const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const WD_LONG = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 const DEFAULT_WEEK = {
   1: ['push', 'bike', 'apex'],
-  2: ['legs_light'],
+  2: ['plyo', 'stretch'],
   3: ['swim', 'apex'],
   4: ['legs_max', 'ski_easy'],
   5: ['plyo', 'stretch'],
   6: ['chestback', 'arms', 'bike_easy', 'apex'],
-  0: ['ski_hard', 'pull']
+  0: ['ski_hard', 'pull', 'legs_light']
 };
 const cloneWeek = (w) => JSON.parse(JSON.stringify(w));
 // Earlier built-in defaults: an unedited copy of one of these is upgraded to DEFAULT_WEEK.
 const OLD_DEFAULT_WEEKS = [
+  { 1: ['push', 'bike', 'apex'], 2: ['legs_light'], 3: ['swim', 'apex'], 4: ['legs_max', 'ski_easy'], 5: ['plyo', 'stretch'], 6: ['chestback', 'arms', 'bike_easy', 'apex'], 0: ['ski_hard', 'pull'] },
   { 1: ['push', 'bike', 'apex'], 2: ['legs_light'], 3: ['swim', 'apex'], 4: ['legs_max', 'ski_easy'], 5: [], 6: ['chestback', 'arms', 'bike_easy', 'apex'], 0: ['ski_hard', 'pull'] },
   { 1: ['push', 'bike', 'apex'], 2: [], 3: ['swim', 'apex'], 4: ['legs', 'ski_easy'], 5: [], 6: ['chestback', 'arms', 'bike_easy', 'apex'], 0: ['ski_hard', 'pull'] }
 ];
@@ -179,7 +180,7 @@ function migrate(raw) {
   const split = (list) => [...new Set((list || []).flatMap((u) => (u === 'plyo_stretch' ? ['plyo', 'stretch'] : [u])))];
   if (rs.week) WEEK_ORDER.forEach((d) => { s.settings.week[d] = split(s.settings.week[d]); });
   Object.keys(s.weekDone).forEach((d) => { s.weekDone[d] = split(s.weekDone[d]); });
-  if (!rs.week || OLD_DEFAULT_WEEKS.some((w) => sameWeek(rs.week, w))) {
+  if (!rs.week || OLD_DEFAULT_WEEKS.some((w) => sameWeek(s.settings.week, w))) {
     s.settings.week = cloneWeek(DEFAULT_WEEK);
     s.settings.days = apexDaysOf(s.settings.week);
   }
@@ -959,7 +960,7 @@ const UNIT_INFO = {
     group: 'SPRUNGKRAFT', kind: 'PLYOMETRICS', title: 'Plyometrics',
     scope: 'Pro Übung · <b>3–4 Sprungübungen</b> (~20 min)',
     cells: [['SÄTZE', '3'], ['WDH.', '5–6'], ['PAUSE', '90 s'], ['SPRÜNGE', '≈ 60']],
-    note: 'Jeder Sprung maximal explosiv, leise landen, zwischen den Sätzen voll erholen – Qualität vor Menge. Vorher 5 min einhüpfen. Beine vom Donnerstag noch schwer? Volumen halbieren oder heute nur dehnen.'
+    note: 'Jeder Sprung maximal explosiv, leise landen, zwischen den Sätzen voll erholen – Qualität vor Menge. Vorher 5 min einhüpfen. Beine vom letzten Beintag noch schwer? Volumen halbieren oder heute nur dehnen.'
   },
   stretch: {
     group: 'REGENERATION', kind: 'DEHNEN', title: 'Dehnen',
