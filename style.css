@@ -540,3 +540,5 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .legs-wo .ski-wo-grid > div { padding: 8px 6px; }
 .legs-wo .ski-wo-grid b { font-size: 13px; white-space: nowrap; }
 .ski-wo-grid b .rel { font-size: 12px; }
+.ski-wo p.legs-scope { margin: -4px 0 10px; color: var(--muted); }
+.legs-scope b { color: var(--text); }

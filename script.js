@@ -938,13 +938,15 @@ function skiWorkoutBox(d) {
 const LEG_INFO = {
   legs_light: {
     kind: 'KRAFTAUSDAUER', title: 'Beine leicht',
+    scope: 'Pro Übung · <b>4–5 Übungen</b> (~45 min)',
     cells: [['SÄTZE', '3–4'], ['WDH.', '15–20'], ['GEWICHT', '50–60%'], ['PAUSE', '60 s']],
     note: 'Leichtes Gewicht, zügiges Tempo. Die letzten Wiederholungen sollen brennen – Technik bleibt sauber.'
   },
   legs_max: {
     kind: 'MAXIMALKRAFT', title: 'Beine Max',
+    scope: 'Pro Übung · <b>2–3 schwere Grundübungen</b> (~50 min)',
     cells: [['SÄTZE', '4–5'], ['WDH.', '3–5'], ['GEWICHT', '85–90%'], ['PAUSE', '3–4 min']],
-    note: 'Vorher 2–3 Aufwärmsätze mit steigendem Gewicht. 1–2 Wdh. Reserve lassen – nie bis zum Versagen.'
+    note: 'Vorher 2–3 Aufwärmsätze mit steigendem Gewicht. 1–2 Wdh. Reserve lassen – nie bis zum Versagen. Kleine Zusatzübung danach (z. B. Waden) normal mit 3 × 10–12.'
   }
 };
 function legsBox(d) {
@@ -953,6 +955,7 @@ function legsBox(d) {
     return `<div class="ski-wo legs-wo">
       <div class="ski-wo-kind">BEINE · ${info.kind}</div>
       <div class="ski-wo-title">${info.title}</div>
+      <p class="small legs-scope">${info.scope}</p>
       <div class="ski-wo-grid">${info.cells.map(([k, v]) => `<div><small>${k}</small><b>${v}</b></div>`).join('')}</div>
       <p class="small ski-wo-note">${info.note}</p>
       <p class="muted small">Gewicht in % deines Maximalgewichts (1 Wiederholung).</p>
