@@ -715,7 +715,7 @@ function renderCal() {
   ps.forEach((s) => (html += sessionCard(s, calSel === today)));
   const items = recentActivity().filter((it) => it.date === calSel);
   if (items.length) html += `<div class="list">${items.map((it) => activityItem(it, true)).join('')}</div>`;
-  if (!ps.length && !items.length) html += `<div class="card empty">Nichts geplant oder eingetragen.</div>`;
+  if (!ps.length && !items.length && !weekUnitsFor(calSel).length && !SKI_PLAN[calSel]) html += `<div class="card empty">Nichts geplant oder eingetragen.</div>`;
   html += `<button class="btn ghost block" data-act="add" data-date="${calSel}" style="margin-top:12px">+ Eintrag für diesen Tag</button>`;
   el.innerHTML = html;
 }
@@ -862,6 +862,73 @@ function updateCardioPreview() {
   $('#cBest').textContent = b ? `Rekord: ${fmtTime(b.time)}` : 'Erster Eintrag';
 }
 
+/* ================= SkiErg-Plan =================
+   Hard sessions on Sundays, easy ones on Thursdays, building to a new 2000 m record.
+   off = seconds per 500 m relative to the current 2k pace (best 2000 m time / 4). */
+const SKI_PLAN = {
+  '2026-10-29': { easy: true, title: '20 min am Stück', off: [15, 20], note: 'Zum Reinkommen – du musst dich dabei unterhalten können.' },
+  '2026-11-01': { test: true, title: '2000-m-Test', note: 'Startwert: Aus dieser Zeit rechnet APEX alle Zieltempos aus. Gleichmäßig starten, auf den letzten 500 m alles geben.' },
+  '2026-11-05': { easy: true, title: '20 min am Stück', off: [15, 20] },
+  '2026-11-08': { title: '6 × 500 m', off: 0, rest: '2:00' },
+  '2026-11-12': { easy: true, title: '20 min am Stück', off: [15, 20] },
+  '2026-11-15': { title: '8 × 250 m', off: -3, rest: '1:30', note: 'Kurz und schnell – Tempo halten, nicht übertreiben im ersten Intervall.' },
+  '2026-11-19': { easy: true, title: '20 min am Stück', off: [15, 20] },
+  '2026-11-22': { title: '5 × 1000 m', off: 3, rest: '3:00', note: 'Ausdauer: alle fünf im gleichen Tempo, der letzte darf nicht einbrechen.' },
+  '2026-11-26': { easy: true, title: '3 × 10 min', off: 15, rest: '1:00' },
+  '2026-11-29': { title: 'Deload: 4 × 500 m', off: 2, rest: '2:00', note: 'Lockere Woche – bewusst nicht ans Limit.' },
+  '2026-12-03': { easy: true, title: '3 × 10 min', off: 15, rest: '1:00' },
+  '2026-12-06': { title: '6 × 500 m', off: -2, rest: '1:30', note: 'Wie am 8.11., aber schneller und mit kürzerer Pause.' },
+  '2026-12-10': { easy: true, title: '3 × 10 min', off: 15, rest: '1:00' },
+  '2026-12-13': { title: '2 × (10 × 30 s hart / 30 s locker)', off: -5, rest: '3:00 zw. Blöcken', note: 'Tempo gilt für die harten 30 s, dazwischen ganz locker weiterziehen.' },
+  '2026-12-17': { easy: true, title: '3 × 10 min', off: 15, rest: '1:00' },
+  '2026-12-20': { title: '2 × 1000 m – Generalprobe', off: -1, rest: '4:00', note: 'Gefühl fürs Renntempo holen.' },
+  '2026-12-24': { easy: true, title: '15 min ganz locker', off: [20, 30], note: 'Nur durchbewegen – Sonntag ist Test.' },
+  '2026-12-27': { test: true, title: '2000-m-Test 🎯', note: 'Ziel: neuer Rekord. Ersten 500 m kontrolliert, ab 1000 m steigern, letzte 250 m alles.' },
+  '2026-12-31': { off: null, rest: null, free: true, title: 'Heute kein SkiErg', note: 'Challenge-Tag: volle Energie für Liegestütze & Klimmzüge.' }
+};
+
+function ski2kPace() {
+  const b = bestOf('ski', 2000);
+  return b ? b.time / 4 : null;
+}
+const offText = (o) => (o === 0 ? '2k-Pace' : `2k-Pace ${o > 0 ? '+' : '−'}${Math.abs(o)} s`);
+function skiTarget(w) {
+  if (w.test || w.free || w.off == null) return null;
+  const base = ski2kPace();
+  if (Array.isArray(w.off)) {
+    const rel = `2k-Pace +${w.off[0]}–${w.off[1]} s`;
+    return { abs: base ? `${fmtTime(base + w.off[0])}–${fmtTime(base + w.off[1])}` : null, rel };
+  }
+  return { abs: base ? fmtTime(base + w.off) : null, rel: offText(w.off) };
+}
+
+function skiWorkoutBox(d) {
+  const w = SKI_PLAN[d];
+  if (!w) return '';
+  if (w.free) return `<div class="ski-wo free"><div class="ski-wo-kind">SKIERG</div><div class="ski-wo-title">${w.title}</div><p class="muted small">${w.note}</p></div>`;
+  const tgt = skiTarget(w);
+  const best = bestOf('ski', 2000);
+  const cells = [];
+  if (w.test) {
+    cells.push(['ZIEL', best ? `&lt; ${fmtTime(best.time)}` : 'Startwert', best ? 'Rekord schlagen' : '']);
+    cells.push(['SPM', '30–34', '']);
+  } else {
+    cells.push(['TEMPO', tgt.abs || tgt.rel, tgt.abs ? `/500m · ${tgt.rel}` : '']);
+    if (w.rest) cells.push(['PAUSE', w.rest, '']);
+    cells.push(['SPM', w.easy ? '24–28' : '32–38', '']);
+  }
+  return `<div class="ski-wo">
+    <div class="ski-wo-kind">SKIERG · ${w.test ? 'TEST' : w.easy ? 'LOCKER' : 'HART'}</div>
+    <div class="ski-wo-title">${w.title}</div>
+    <div class="ski-wo-grid">${cells.map(([k, v, sub]) => `<div><small>${k}</small><b>${v}</b>${sub ? `<em>${sub}</em>` : ''}</div>`).join('')}</div>
+    <p class="muted small">${w.easy ? 'Einrudern 3 min locker · Ausrudern 3 min' : 'Aufwärmen 8 min (5 min locker + 3 × 20 s im Zieltempo) · Ausrudern 5 min'} · Damper 4–6</p>
+    ${w.note ? `<p class="small ski-wo-note">${w.note}</p>` : ''}
+    ${!w.test && !tgt.abs ? '<p class="muted small">Nach deinem ersten 2000-m-Test rechnet APEX hier dein genaues Zieltempo aus.</p>' : ''}
+    ${w.test ? `<button class="btn ski solid block" data-act="cardio" data-type="ski" data-dist="2000" data-date="${d}" style="margin-top:10px">2000-m-Zeit eintragen</button>` : ''}
+  </div>`;
+}
+const skiLine = (d) => (SKI_PLAN[d] && !SKI_PLAN[d].free ? `<div class="wk-ski">SkiErg: ${SKI_PLAN[d].title}</div>` : '');
+
 /* ================= Wochenplan ================= */
 let weekForm = null; // unsaved edits while the sheet is open
 const weekUnitsFor = (d) => state.settings.week[parse(d).getDay()] || [];
@@ -905,12 +972,13 @@ function weekTodayCard() {
   return `<div class="card">
     <div class="kicker"><span>Wochenplan · Heute</span><button class="link" data-act="plan-ex" data-ex="week" data-goto="1">Woche ›</button></div>
     ${units.length ? unitList(units, today) : '<div class="h1" style="font-size:16px">Ruhetag laut Wochenplan</div>'}
+    ${skiWorkoutBox(today)}
     <div class="wk-strip">${strip}</div>
   </div>`;
 }
 
 function weekDayCard(d) {
-  return `<div class="card"><div class="kicker"><span>Wochenplan · ${WD_LONG[parse(d).getDay()]}</span></div>${unitList(weekUnitsFor(d), d)}</div>`;
+  return `<div class="card"><div class="kicker"><span>Wochenplan · ${WD_LONG[parse(d).getDay()]}</span></div>${unitList(weekUnitsFor(d), d)}${skiWorkoutBox(d)}</div>`;
 }
 
 function renderWeekPlan() {
@@ -920,7 +988,7 @@ function renderWeekPlan() {
     const d = addDays(ws, i);
     return `<div class="wk-row ${d === today ? 'today' : ''}">
       <div class="wk-name">${WD[dow]}<small>${fmtShort(d)}</small></div>
-      ${unitList(state.settings.week[dow] || [], d)}
+      <div>${unitList(state.settings.week[dow] || [], d)}${skiLine(d)}</div>
     </div>`;
   }).join('');
   return `<div class="card plan-card">${rows}</div>

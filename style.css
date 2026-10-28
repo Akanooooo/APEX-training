@@ -517,3 +517,17 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .wk-edit .chip.on { border-color: var(--uc); color: var(--uc); background: color-mix(in srgb, var(--uc) 14%, transparent); }
 .link { border: 0; background: none; padding: 0; color: var(--cyan); font-family: var(--font-hud); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }
 .seg.three button { font-size: 10px; letter-spacing: 1px; padding: 10px 2px; }
+
+/* ===== SkiErg-Einheit ===== */
+.ski-wo { margin-top: 12px; padding: 12px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--ski) 40%, transparent); background: color-mix(in srgb, var(--ski) 7%, transparent); }
+.ski-wo.free { border-style: dashed; }
+.ski-wo-kind { font-family: var(--font-hud); font-size: 9px; letter-spacing: 2px; color: var(--ski); }
+.ski-wo-title { font-family: var(--font-hud); font-weight: 700; font-size: 17px; margin: 4px 0 10px; }
+.ski-wo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.ski-wo-grid > div { display: grid; gap: 2px; padding: 8px; border-radius: 10px; background: color-mix(in srgb, var(--ski) 8%, transparent); }
+.ski-wo-grid small { font-family: var(--font-hud); font-size: 8px; letter-spacing: 1.5px; color: var(--muted); }
+.ski-wo-grid b { font-family: var(--font-hud); font-size: 16px; color: var(--ski); }
+.ski-wo-grid em { font-style: normal; font-size: 11px; color: var(--muted); }
+.ski-wo p { margin: 4px 0 0; }
+.ski-wo-note { color: var(--text); }
+.wk-ski { margin-top: 6px; font-size: 13px; color: var(--ski); }
