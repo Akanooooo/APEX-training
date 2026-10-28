@@ -531,3 +531,12 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .ski-wo p { margin: 4px 0 0; }
 .ski-wo-note { color: var(--text); }
 .wk-ski { margin-top: 6px; font-size: 13px; color: var(--ski); }
+
+/* ===== Beintage ===== */
+.legs-wo { border-color: color-mix(in srgb, var(--gym) 40%, transparent); background: color-mix(in srgb, var(--gym) 7%, transparent); }
+.legs-wo .ski-wo-kind, .legs-wo .ski-wo-grid b { color: var(--gym); }
+.legs-wo .ski-wo-grid > div { background: color-mix(in srgb, var(--gym) 8%, transparent); }
+.legs-wo .ski-wo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.legs-wo .ski-wo-grid > div { padding: 8px 6px; }
+.legs-wo .ski-wo-grid b { font-size: 13px; white-space: nowrap; }
+.ski-wo-grid b .rel { font-size: 12px; }

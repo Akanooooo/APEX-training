@@ -33,6 +33,8 @@ const UNITS = {
   chestback: { name: 'Brust/Rücken', color: 'var(--gym)', kind: 'gym' },
   arms: { name: 'Arme', color: 'var(--gym)', kind: 'gym' },
   legs: { name: 'Beine', color: 'var(--gym)', kind: 'gym' },
+  legs_light: { name: 'Beine leicht', color: 'var(--gym)', kind: 'gym' },
+  legs_max: { name: 'Beine Max', color: 'var(--gym)', kind: 'gym' },
   ski_hard: { name: 'SkiErg hart', color: 'var(--ski)', kind: 'ski' },
   ski_easy: { name: 'Ski locker', color: 'var(--ski)', kind: 'ski' },
   bike: { name: 'Rad', color: 'var(--bike)', kind: 'bike' },
@@ -44,14 +46,19 @@ const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const WD_LONG = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 const DEFAULT_WEEK = {
   1: ['push', 'bike', 'apex'],
-  2: [],
+  2: ['legs_light'],
   3: ['swim', 'apex'],
-  4: ['legs', 'ski_easy'],
+  4: ['legs_max', 'ski_easy'],
   5: [],
   6: ['chestback', 'arms', 'bike_easy', 'apex'],
   0: ['ski_hard', 'pull']
 };
 const cloneWeek = (w) => JSON.parse(JSON.stringify(w));
+// Earlier built-in defaults: an unedited copy of one of these is upgraded to DEFAULT_WEEK.
+const OLD_DEFAULT_WEEKS = [
+  { 1: ['push', 'bike', 'apex'], 2: [], 3: ['swim', 'apex'], 4: ['legs', 'ski_easy'], 5: [], 6: ['chestback', 'arms', 'bike_easy', 'apex'], 0: ['ski_hard', 'pull'] }
+];
+const sameWeek = (a, b) => WEEK_ORDER.every((d) => JSON.stringify(a[d] || []) === JSON.stringify(b[d] || []));
 // APEX (push-ups + pull-ups) is planned on exactly the days that contain the APEX unit.
 const apexDaysOf = (week) => WEEK_ORDER.filter((d) => (week[d] || []).includes('apex'));
 
@@ -165,7 +172,7 @@ function migrate(raw) {
   s.gym = s.gym || [];
   s.ftp = s.ftp || [];
   s.weekDone = s.weekDone || {};
-  if (!rs.week) {
+  if (!rs.week || OLD_DEFAULT_WEEKS.some((w) => sameWeek(rs.week, w))) {
     s.settings.week = cloneWeek(DEFAULT_WEEK);
     s.settings.days = apexDaysOf(s.settings.week);
   }
@@ -913,7 +920,7 @@ function skiWorkoutBox(d) {
     cells.push(['ZIEL', best ? `&lt; ${fmtTime(best.time)}` : 'Startwert', best ? 'Rekord schlagen' : '']);
     cells.push(['SPM', '30–34', '']);
   } else {
-    cells.push(['TEMPO', tgt.abs || tgt.rel, tgt.abs ? `/500m · ${tgt.rel}` : '']);
+    cells.push(['TEMPO', tgt.abs || `<span class="rel">${tgt.rel}</span>`, tgt.abs ? `/500m · ${tgt.rel}` : '']);
     if (w.rest) cells.push(['PAUSE', w.rest, '']);
     cells.push(['SPM', w.easy ? '24–28' : '32–38', '']);
   }
@@ -927,6 +934,32 @@ function skiWorkoutBox(d) {
     ${w.test ? `<button class="btn ski solid block" data-act="cardio" data-type="ski" data-dist="2000" data-date="${d}" style="margin-top:10px">2000-m-Zeit eintragen</button>` : ''}
   </div>`;
 }
+// Leg days: load parameters only, the exercises are up to you.
+const LEG_INFO = {
+  legs_light: {
+    kind: 'KRAFTAUSDAUER', title: 'Beine leicht',
+    cells: [['SÄTZE', '3–4'], ['WDH.', '15–20'], ['GEWICHT', '50–60%'], ['PAUSE', '60 s']],
+    note: 'Leichtes Gewicht, zügiges Tempo. Die letzten Wiederholungen sollen brennen – Technik bleibt sauber.'
+  },
+  legs_max: {
+    kind: 'MAXIMALKRAFT', title: 'Beine Max',
+    cells: [['SÄTZE', '4–5'], ['WDH.', '3–5'], ['GEWICHT', '85–90%'], ['PAUSE', '3–4 min']],
+    note: 'Vorher 2–3 Aufwärmsätze mit steigendem Gewicht. 1–2 Wdh. Reserve lassen – nie bis zum Versagen.'
+  }
+};
+function legsBox(d) {
+  return weekUnitsFor(d).filter((u) => LEG_INFO[u]).map((u) => {
+    const info = LEG_INFO[u];
+    return `<div class="ski-wo legs-wo">
+      <div class="ski-wo-kind">BEINE · ${info.kind}</div>
+      <div class="ski-wo-title">${info.title}</div>
+      <div class="ski-wo-grid">${info.cells.map(([k, v]) => `<div><small>${k}</small><b>${v}</b></div>`).join('')}</div>
+      <p class="small ski-wo-note">${info.note}</p>
+      <p class="muted small">Gewicht in % deines Maximalgewichts (1 Wiederholung).</p>
+    </div>`;
+  }).join('');
+}
+
 const skiLine = (d) => (SKI_PLAN[d] && !SKI_PLAN[d].free ? `<div class="wk-ski">SkiErg: ${SKI_PLAN[d].title}</div>` : '');
 
 /* ================= Wochenplan ================= */
@@ -972,13 +1005,13 @@ function weekTodayCard() {
   return `<div class="card">
     <div class="kicker"><span>Wochenplan · Heute</span><button class="link" data-act="plan-ex" data-ex="week" data-goto="1">Woche ›</button></div>
     ${units.length ? unitList(units, today) : '<div class="h1" style="font-size:16px">Ruhetag laut Wochenplan</div>'}
-    ${skiWorkoutBox(today)}
+    ${skiWorkoutBox(today)}${legsBox(today)}
     <div class="wk-strip">${strip}</div>
   </div>`;
 }
 
 function weekDayCard(d) {
-  return `<div class="card"><div class="kicker"><span>Wochenplan · ${WD_LONG[parse(d).getDay()]}</span></div>${unitList(weekUnitsFor(d), d)}${skiWorkoutBox(d)}</div>`;
+  return `<div class="card"><div class="kicker"><span>Wochenplan · ${WD_LONG[parse(d).getDay()]}</span></div>${unitList(weekUnitsFor(d), d)}${skiWorkoutBox(d)}${legsBox(d)}</div>`;
 }
 
 function renderWeekPlan() {
