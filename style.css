@@ -13,6 +13,8 @@
   --ok: #6dff9c;
   --gold: #ffd54a;
   --swim: #4da6ff;
+  --plyo: #00e5c0;
+  --stretch: #9db4ff;
   --gym: #ff4fa3;
   --pull: #b6ff3d;
   --bad: #ff5470;
@@ -533,9 +535,9 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .wk-ski { margin-top: 6px; font-size: 13px; color: var(--ski); }
 
 /* ===== Beintage ===== */
-.legs-wo { border-color: color-mix(in srgb, var(--gym) 40%, transparent); background: color-mix(in srgb, var(--gym) 7%, transparent); }
-.legs-wo .ski-wo-kind, .legs-wo .ski-wo-grid b { color: var(--gym); }
-.legs-wo .ski-wo-grid > div { background: color-mix(in srgb, var(--gym) 8%, transparent); }
+.legs-wo { border-color: color-mix(in srgb, var(--uc, var(--gym)) 40%, transparent); background: color-mix(in srgb, var(--uc, var(--gym)) 7%, transparent); }
+.legs-wo .ski-wo-kind, .legs-wo .ski-wo-grid b { color: var(--uc, var(--gym)); }
+.legs-wo .ski-wo-grid > div { background: color-mix(in srgb, var(--uc, var(--gym)) 8%, transparent); }
 .legs-wo .ski-wo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .legs-wo .ski-wo-grid > div { padding: 8px 6px; }
 .legs-wo .ski-wo-grid b { font-size: 13px; white-space: nowrap; }

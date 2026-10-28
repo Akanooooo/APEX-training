@@ -35,6 +35,8 @@ const UNITS = {
   legs: { name: 'Beine', color: 'var(--gym)', kind: 'gym' },
   legs_light: { name: 'Beine leicht', color: 'var(--gym)', kind: 'gym' },
   legs_max: { name: 'Beine Max', color: 'var(--gym)', kind: 'gym' },
+  plyo: { name: 'Plyometrics', color: 'var(--plyo)', kind: 'recovery' },
+  stretch: { name: 'Dehnen', color: 'var(--stretch)', kind: 'recovery' },
   ski_hard: { name: 'SkiErg hart', color: 'var(--ski)', kind: 'ski' },
   ski_easy: { name: 'Ski locker', color: 'var(--ski)', kind: 'ski' },
   bike: { name: 'Rad', color: 'var(--bike)', kind: 'bike' },
@@ -49,13 +51,14 @@ const DEFAULT_WEEK = {
   2: ['legs_light'],
   3: ['swim', 'apex'],
   4: ['legs_max', 'ski_easy'],
-  5: [],
+  5: ['plyo', 'stretch'],
   6: ['chestback', 'arms', 'bike_easy', 'apex'],
   0: ['ski_hard', 'pull']
 };
 const cloneWeek = (w) => JSON.parse(JSON.stringify(w));
 // Earlier built-in defaults: an unedited copy of one of these is upgraded to DEFAULT_WEEK.
 const OLD_DEFAULT_WEEKS = [
+  { 1: ['push', 'bike', 'apex'], 2: ['legs_light'], 3: ['swim', 'apex'], 4: ['legs_max', 'ski_easy'], 5: [], 6: ['chestback', 'arms', 'bike_easy', 'apex'], 0: ['ski_hard', 'pull'] },
   { 1: ['push', 'bike', 'apex'], 2: [], 3: ['swim', 'apex'], 4: ['legs', 'ski_easy'], 5: [], 6: ['chestback', 'arms', 'bike_easy', 'apex'], 0: ['ski_hard', 'pull'] }
 ];
 const sameWeek = (a, b) => WEEK_ORDER.every((d) => JSON.stringify(a[d] || []) === JSON.stringify(b[d] || []));
@@ -934,31 +937,43 @@ function skiWorkoutBox(d) {
     ${w.test ? `<button class="btn ski solid block" data-act="cardio" data-type="ski" data-dist="2000" data-date="${d}" style="margin-top:10px">2000-m-Zeit eintragen</button>` : ''}
   </div>`;
 }
-// Leg days: load parameters only, the exercises are up to you.
-const LEG_INFO = {
+// Units with fixed load parameters (no exercises – those are up to you).
+const UNIT_INFO = {
   legs_light: {
-    kind: 'KRAFTAUSDAUER', title: 'Beine leicht',
+    group: 'BEINE', kind: 'KRAFTAUSDAUER', pct: true, title: 'Beine leicht',
     scope: 'Pro Übung · <b>4–5 Übungen</b> (~45 min)',
     cells: [['SÄTZE', '3–4'], ['WDH.', '15–20'], ['GEWICHT', '50–60%'], ['PAUSE', '60 s']],
     note: 'Leichtes Gewicht, zügiges Tempo. Die letzten Wiederholungen sollen brennen – Technik bleibt sauber.'
   },
   legs_max: {
-    kind: 'MAXIMALKRAFT', title: 'Beine Max',
+    group: 'BEINE', kind: 'MAXIMALKRAFT', pct: true, title: 'Beine Max',
     scope: 'Pro Übung · <b>2–3 schwere Grundübungen</b> (~50 min)',
     cells: [['SÄTZE', '4–5'], ['WDH.', '3–5'], ['GEWICHT', '85–90%'], ['PAUSE', '3–4 min']],
     note: 'Vorher 2–3 Aufwärmsätze mit steigendem Gewicht. 1–2 Wdh. Reserve lassen – nie bis zum Versagen. Kleine Zusatzübung danach (z. B. Waden) normal mit 3 × 10–12.'
+  },
+  plyo: {
+    group: 'SPRUNGKRAFT', kind: 'PLYOMETRICS', title: 'Plyometrics',
+    scope: 'Pro Übung · <b>3–4 Sprungübungen</b> (~20 min)',
+    cells: [['SÄTZE', '3'], ['WDH.', '5–6'], ['PAUSE', '90 s'], ['SPRÜNGE', '≈ 60']],
+    note: 'Jeder Sprung maximal explosiv, leise landen, zwischen den Sätzen voll erholen – Qualität vor Menge. Vorher 5 min einhüpfen. Beine vom Donnerstag noch schwer? Volumen halbieren oder heute nur dehnen.'
+  },
+  stretch: {
+    group: 'REGENERATION', kind: 'DEHNEN', title: 'Dehnen',
+    scope: 'Ganzer Körper · <b>8–10 Positionen</b> (~20 min)',
+    cells: [['RUNDEN', '2'], ['HALTEN', '30–45 s'], ['PRO SEITE', 'ja']],
+    note: 'Schwerpunkt Hüfte, Oberschenkel, Brust und Schultern – das wird durch Liegestütze, Klimmzüge, SkiErg und Beintraining am meisten fest. Ruhig atmen, nicht wippen.'
   }
 };
 function legsBox(d) {
-  return weekUnitsFor(d).filter((u) => LEG_INFO[u]).map((u) => {
-    const info = LEG_INFO[u];
-    return `<div class="ski-wo legs-wo">
-      <div class="ski-wo-kind">BEINE · ${info.kind}</div>
+  return weekUnitsFor(d).filter((u) => UNIT_INFO[u]).map((u) => {
+    const info = UNIT_INFO[u];
+    return `<div class="ski-wo legs-wo" style="--uc:${UNITS[u].color}">
+      <div class="ski-wo-kind">${info.group} · ${info.kind}</div>
       <div class="ski-wo-title">${info.title}</div>
       <p class="small legs-scope">${info.scope}</p>
-      <div class="ski-wo-grid">${info.cells.map(([k, v]) => `<div><small>${k}</small><b>${v}</b></div>`).join('')}</div>
+      <div class="ski-wo-grid" style="grid-template-columns:repeat(${info.cells.length}, minmax(0, 1fr))">${info.cells.map(([k, v]) => `<div><small>${k}</small><b>${v}</b></div>`).join('')}</div>
       <p class="small ski-wo-note">${info.note}</p>
-      <p class="muted small">Gewicht in % deines Maximalgewichts (1 Wiederholung).</p>
+      ${info.pct ? '<p class="muted small">Gewicht in % deines Maximalgewichts (1 Wiederholung).</p>' : ''}
     </div>`;
   }).join('');
 }
