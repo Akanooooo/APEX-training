@@ -35,8 +35,7 @@ const UNITS = {
   legs: { name: 'Beine', color: 'var(--gym)', kind: 'gym' },
   legs_light: { name: 'Beine leicht', color: 'var(--gym)', kind: 'gym' },
   legs_max: { name: 'Beine Max', color: 'var(--gym)', kind: 'gym' },
-  plyo: { name: 'Plyometrics', color: 'var(--plyo)', kind: 'recovery' },
-  stretch: { name: 'Dehnen', color: 'var(--stretch)', kind: 'recovery' },
+  plyo_stretch: { name: 'Plyometrics & Dehnen', color: 'var(--plyo)', kind: 'recovery' },
   ski_hard: { name: 'SkiErg hart', color: 'var(--ski)', kind: 'ski' },
   ski_easy: { name: 'Ski locker', color: 'var(--ski)', kind: 'ski' },
   bike: { name: 'Rad', color: 'var(--bike)', kind: 'bike' },
@@ -51,7 +50,7 @@ const DEFAULT_WEEK = {
   2: ['legs_light'],
   3: ['swim', 'apex'],
   4: ['legs_max', 'ski_easy'],
-  5: ['plyo', 'stretch'],
+  5: ['plyo_stretch'],
   6: ['chestback', 'arms', 'bike_easy', 'apex'],
   0: ['ski_hard', 'pull']
 };
@@ -175,7 +174,11 @@ function migrate(raw) {
   s.gym = s.gym || [];
   s.ftp = s.ftp || [];
   s.weekDone = s.weekDone || {};
-  if (!rs.week || OLD_DEFAULT_WEEKS.some((w) => sameWeek(rs.week, w))) {
+  // Plyometrics and stretching used to be two separate units.
+  const merge = (list) => [...new Set((list || []).map((u) => (u === 'plyo' || u === 'stretch' ? 'plyo_stretch' : u)))];
+  if (rs.week) WEEK_ORDER.forEach((d) => { s.settings.week[d] = merge(s.settings.week[d]); });
+  Object.keys(s.weekDone).forEach((d) => { s.weekDone[d] = merge(s.weekDone[d]); });
+  if (!rs.week || OLD_DEFAULT_WEEKS.some((w) => sameWeek(s.settings.week, w))) {
     s.settings.week = cloneWeek(DEFAULT_WEEK);
     s.settings.days = apexDaysOf(s.settings.week);
   }
@@ -950,18 +953,6 @@ const UNIT_INFO = {
     scope: 'Pro Übung · <b>2–3 schwere Grundübungen</b> (~50 min)',
     cells: [['SÄTZE', '4–5'], ['WDH.', '3–5'], ['GEWICHT', '85–90%'], ['PAUSE', '3–4 min']],
     note: 'Vorher 2–3 Aufwärmsätze mit steigendem Gewicht. 1–2 Wdh. Reserve lassen – nie bis zum Versagen. Kleine Zusatzübung danach (z. B. Waden) normal mit 3 × 10–12.'
-  },
-  plyo: {
-    group: 'SPRUNGKRAFT', kind: 'PLYOMETRICS', title: 'Plyometrics',
-    scope: 'Pro Übung · <b>3–4 Sprungübungen</b> (~20 min)',
-    cells: [['SÄTZE', '3'], ['WDH.', '5–6'], ['PAUSE', '90 s'], ['SPRÜNGE', '≈ 60']],
-    note: 'Jeder Sprung maximal explosiv, leise landen, zwischen den Sätzen voll erholen – Qualität vor Menge. Vorher 5 min einhüpfen. Beine vom Donnerstag noch schwer? Volumen halbieren oder heute nur dehnen.'
-  },
-  stretch: {
-    group: 'REGENERATION', kind: 'DEHNEN', title: 'Dehnen',
-    scope: 'Ganzer Körper · <b>8–10 Positionen</b> (~20 min)',
-    cells: [['RUNDEN', '2'], ['HALTEN', '30–45 s'], ['PRO SEITE', 'ja']],
-    note: 'Schwerpunkt Hüfte, Oberschenkel, Brust und Schultern – das wird durch Liegestütze, Klimmzüge, SkiErg und Beintraining am meisten fest. Ruhig atmen, nicht wippen.'
   }
 };
 function legsBox(d) {
